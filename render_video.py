@@ -102,7 +102,7 @@ progress_bar = progress_bar.set_duration(final_duration)
 final_video = CompositeVideoClip([final_video, progress_bar])
 
 try:
-    bgm = AudioFileClip("bgm.mp3").volumex(0.10)
+    bgm = AudioFileClip("bgm.mp3").volumex(0.32)
     if bgm.duration < final_video.duration: bgm = afx.audio_loop(bgm, duration=final_video.duration)
     else: bgm = bgm.subclip(0, final_video.duration)
     audio_clips.append(bgm)
