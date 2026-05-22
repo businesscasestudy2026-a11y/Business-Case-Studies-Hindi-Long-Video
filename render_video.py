@@ -31,7 +31,9 @@ else:
 # --- FIX END ---
 
 total_chars = sum(len(s['text']) for s in scenes_data)
-video_clips = []
+
+# 🚀 MEMORY FIX: Initialize a list to hold paths instead of RAM objects
+rendered_scene_paths = []
 audio_clips = [voiceover]
 headers = {"Authorization": pexels_key}
 current_time = 0.0
@@ -51,6 +53,8 @@ for i, scene in enumerate(scenes_data):
     scene_duration = voiceover.duration * (len(text_line) / max(total_chars, 1))
     if scene_duration < 1.0: scene_duration = 1.0
     
+    clip_to_close = None
+    
     try:
         # FIX 1: Strict 15-second timeout for the API call
         res = requests.get(f"https://api.pexels.com/videos/search?query={keyword}&per_page=1&orientation=landscape", headers=headers, timeout=15).json()
@@ -67,6 +71,7 @@ for i, scene in enumerate(scenes_data):
             f.write(requests.get(video_url, timeout=30).content)
             
         clip = VideoFileClip(vid_path).subclip(0, scene_duration)
+        clip_to_close = clip
         clip = clip.resize(height=TARGET_H)
         if clip.w < TARGET_W:
             clip = clip.resize(width=TARGET_W)
@@ -97,15 +102,30 @@ for i, scene in enumerate(scenes_data):
         word_clips.extend([bg_txt, main_txt])
     
     final_scene = CompositeVideoClip([zoomed_clip, dark_overlay] + word_clips, size=(TARGET_W, TARGET_H)).set_duration(scene_duration)
-    video_clips.append(final_scene)
+    
+    # 🚀 MEMORY FIX: Render the scene immediately and save to disk
+    temp_scene_path = f"temp_scene_{i}.mp4"
+    final_scene.write_videofile(temp_scene_path, fps=24, codec="libx264", audio=False, preset="ultrafast", threads=2)
+    rendered_scene_paths.append(temp_scene_path)
+    
+    # 🚀 MEMORY FIX: Force garbage collection to free RAM immediately
+    final_scene.close()
+    zoomed_clip.close()
+    dark_overlay.close()
+    for wc in word_clips:
+        wc.close()
+    if clip_to_close:
+        clip_to_close.close()
     
     if whoosh_sfx: audio_clips.append(whoosh_sfx.set_start(current_time))
     if pop_sfx: audio_clips.append(pop_sfx.set_start(current_time + 0.1))
             
     current_time += scene_duration
-    print(f"Scene {i+1} Ready: {keyword}")
+    print(f"Scene {i+1} Ready & Saved: {keyword}")
 
-final_video = concatenate_videoclips(video_clips, method="compose")
+# 🚀 MEMORY FIX: Load the flat MP4 chunks back in for final concatenation
+loaded_clips = [VideoFileClip(path) for path in rendered_scene_paths]
+final_video = concatenate_videoclips(loaded_clips, method="compose")
 
 final_duration = final_video.duration
 progress_bar = ColorClip(size=(TARGET_W, 15), color=(255, 0, 0))
@@ -125,6 +145,11 @@ final_video = final_video.set_audio(final_audio)
 
 print("Rendering Final COMPRESSED LONG Video...")
 final_video.write_videofile("final_video.mp4", fps=24, codec="libx264", audio_codec="aac", threads=2, bitrate="1000k", preset="ultrafast")
+
+# Clean up memory for the final loaded chunks
+final_video.close()
+for c in loaded_clips:
+    c.close()
 
 print("Starting 5-Layer Indestructible Upload System...")
 video_link = "Upload Failed"
