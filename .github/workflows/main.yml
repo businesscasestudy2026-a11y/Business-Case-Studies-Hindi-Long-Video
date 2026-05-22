@@ -17,10 +17,10 @@ jobs:
         with:
           python-version: '3.10'
 
-      # 🚀 MEMORY FIX: Add 10GB Virtual Swap Space to prevent GitHub Runner crashes
+      # 🚀 MEMORY FIX: Add 10GB Virtual Swap Space (Using dd to bypass fallocate 'Text file busy' error)
       - name: Set up swap space
         run: |
-          sudo fallocate -l 10G /swapfile
+          sudo dd if=/dev/zero of=/swapfile bs=1M count=10240
           sudo chmod 600 /swapfile
           sudo mkswap /swapfile
           sudo swapon /swapfile
