@@ -38,4 +38,4 @@ jobs:
           THUMBNAIL_PROMPT: ${{ github.event.client_payload.thumbnail_prompt }}
           RESUME_URL: ${{ github.event.client_payload.resume_url }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }} 
-        run: python render_video.py
+        run: python -u render_video.py
