@@ -52,12 +52,19 @@ for i, scene in enumerate(scenes_data):
     if scene_duration < 1.0: scene_duration = 1.0
     
     try:
-        res = requests.get(f"https://api.pexels.com/videos/search?query={keyword}&per_page=1&orientation=landscape", headers=headers).json()
+        # FIX 1: Strict 15-second timeout for the API call
+        res = requests.get(f"https://api.pexels.com/videos/search?query={keyword}&per_page=1&orientation=landscape", headers=headers, timeout=15).json()
+        
+        # FIX 2: Handle empty results from Pexels safely
+        if not res.get('videos'):
+            raise ValueError(f"No videos found on Pexels for keyword: '{keyword}'")
+            
         video_url = res['videos'][0]['video_files'][0]['link']
         
         vid_path = f"vid_{i}.mp4"
         with open(vid_path, "wb") as f:
-            f.write(requests.get(video_url).content)
+            # FIX 3: Strict 30-second timeout for the actual video download
+            f.write(requests.get(video_url, timeout=30).content)
             
         clip = VideoFileClip(vid_path).subclip(0, scene_duration)
         clip = clip.resize(height=TARGET_H)
@@ -66,32 +73,37 @@ for i, scene in enumerate(scenes_data):
         clip = clip.crop(x_center=clip.w/2, y_center=clip.h/2, width=TARGET_W, height=TARGET_H)
         
         zoomed_clip = clip.resize(lambda t: 1.0 + 0.04 * (t / scene_duration)).set_position(('center', 'center'))
-        dark_overlay = ColorClip(size=(TARGET_W, TARGET_H), color=(0,0,0)).set_opacity(0.35).set_position(('center', 'center')).set_duration(scene_duration)
         
-        words = text_line.split(' ')
-        chunk_size = 3
-        chunks = [' '.join(words[j:j + chunk_size]) for j in range(0, len(words), chunk_size)]
-        word_clips = []
-        duration_per_chunk = scene_duration / len(chunks)
-        
-        for w_i, chunk in enumerate(chunks):
-            current_color = viral_colors[w_i % len(viral_colors)]
-            bg_txt = TextClip(chunk, fontsize=100, color='black', font=HINDI_FONT_FILE, stroke_color='black', stroke_width=15, method='caption', size=(1600, None))
-            bg_txt = bg_txt.set_position(('center', 'center')).set_duration(duration_per_chunk).set_start(w_i * duration_per_chunk)
-            main_txt = TextClip(chunk, fontsize=100, color=current_color, font=HINDI_FONT_FILE, stroke_color='black', stroke_width=3, method='caption', size=(1600, None))
-            main_txt = main_txt.set_position(('center', 'center')).set_duration(duration_per_chunk).set_start(w_i * duration_per_chunk)
-            word_clips.extend([bg_txt, main_txt])
-        
-        final_scene = CompositeVideoClip([zoomed_clip, dark_overlay] + word_clips, size=(TARGET_W, TARGET_H)).set_duration(scene_duration)
-        video_clips.append(final_scene)
-        
-        if whoosh_sfx: audio_clips.append(whoosh_sfx.set_start(current_time))
-        if pop_sfx: audio_clips.append(pop_sfx.set_start(current_time + 0.1))
-                
-        current_time += scene_duration
-        print(f"Scene {i+1} Ready: {keyword}")
     except Exception as e:
-        print(f"Error on scene {i}: {e}")
+        print(f"⚠️ API/Download Error on scene {i} '{keyword}': {e}. Using fallback background.")
+        # FIX 4: Fallback solid background so the scene is still added and audio sync isn't destroyed
+        zoomed_clip = ColorClip(size=(TARGET_W, TARGET_H), color=(20, 20, 20)).set_duration(scene_duration)
+
+    # Apply overlays and text regardless of whether the video downloaded or the fallback triggered
+    dark_overlay = ColorClip(size=(TARGET_W, TARGET_H), color=(0,0,0)).set_opacity(0.35).set_position(('center', 'center')).set_duration(scene_duration)
+    
+    words = text_line.split(' ')
+    chunk_size = 3
+    chunks = [' '.join(words[j:j + chunk_size]) for j in range(0, len(words), chunk_size)]
+    word_clips = []
+    duration_per_chunk = scene_duration / len(chunks)
+    
+    for w_i, chunk in enumerate(chunks):
+        current_color = viral_colors[w_i % len(viral_colors)]
+        bg_txt = TextClip(chunk, fontsize=100, color='black', font=HINDI_FONT_FILE, stroke_color='black', stroke_width=15, method='caption', size=(1600, None))
+        bg_txt = bg_txt.set_position(('center', 'center')).set_duration(duration_per_chunk).set_start(w_i * duration_per_chunk)
+        main_txt = TextClip(chunk, fontsize=100, color=current_color, font=HINDI_FONT_FILE, stroke_color='black', stroke_width=3, method='caption', size=(1600, None))
+        main_txt = main_txt.set_position(('center', 'center')).set_duration(duration_per_chunk).set_start(w_i * duration_per_chunk)
+        word_clips.extend([bg_txt, main_txt])
+    
+    final_scene = CompositeVideoClip([zoomed_clip, dark_overlay] + word_clips, size=(TARGET_W, TARGET_H)).set_duration(scene_duration)
+    video_clips.append(final_scene)
+    
+    if whoosh_sfx: audio_clips.append(whoosh_sfx.set_start(current_time))
+    if pop_sfx: audio_clips.append(pop_sfx.set_start(current_time + 0.1))
+            
+    current_time += scene_duration
+    print(f"Scene {i+1} Ready: {keyword}")
 
 final_video = concatenate_videoclips(video_clips, method="compose")
 
