@@ -17,14 +17,11 @@ jobs:
         with:
           python-version: '3.10'
 
-      # 🚀 MEMORY FIX: Add 10GB Virtual Swap Space (Using dd to bypass fallocate 'Text file busy' error)
+      # 🚀 MEMORY FIX: Using a dedicated GitHub Action to safely create swap space
       - name: Set up swap space
-        run: |
-          sudo dd if=/dev/zero of=/swapfile bs=1M count=10240
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
-          free -m
+        uses: pierotofy/set-swap-space@master
+        with:
+          swap-size-gb: 10
 
       - name: Install System Dependencies (FFmpeg & ImageMagick)
         run: |
