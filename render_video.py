@@ -1,4 +1,4 @@
-import os, requests, json, subprocess, socket
+import os, requests, json, subprocess, socket, time
 import moviepy.editor as mpe
 import urllib3.util.connection as urllib3_cn
 from moviepy.editor import VideoFileClip, AudioFileClip, CompositeAudioClip, CompositeVideoClip, TextClip, concatenate_videoclips, vfx, afx, ColorClip
@@ -198,10 +198,30 @@ safe_headers = {
 
 if resume_url:
     print(f"Resuming n8n workflow at: {resume_url}")
-    try:
-        response = requests.post(resume_url, json={"body": payload}, headers=safe_headers, timeout=30)
-        print(f"n8n Resume Response: {response.status_code} - {response.text}")
-    except Exception as e:
-        print(f"Warning: Failed to resume n8n. Error: {e}")
+    max_retries = 5
+    
+    for attempt in range(max_retries):
+        try:
+            print(f"Attempt {attempt + 1} of {max_retries} to hit n8n webhook...")
+            response = requests.post(resume_url, json={"body": payload}, headers=safe_headers, timeout=30)
+            
+            print(f"n8n Resume Response: {response.status_code} - {response.text}")
+            
+            # Agar successfully hit ho gaya toh loop break kar do
+            if response.status_code in [200, 201]:
+                print("✅ Webhook successfully triggered!")
+                break
+            else:
+                print(f"⚠️ Webhook returned status: {response.status_code}")
+                
+        except Exception as e:
+            print(f"⚠️ Warning: Failed to resume n8n. Error: {e}")
+            
+        # Agar aakhri attempt nahi hai, toh 15 seconds wait karke wapas try karo
+        if attempt < max_retries - 1:
+            print("⏳ Retrying in 15 seconds...")
+            time.sleep(15)
+    else:
+        print("❌ All retries failed. Please check Hostinger Firewall.")
 else:
     print("No RESUME_URL provided by n8n.")
