@@ -1,12 +1,13 @@
 import os, requests, json, subprocess, socket, time
 import moviepy.editor as mpe
-import urllib3.util.connection as urllib3_cn
+# import urllib3.util.connection as urllib3_cn # Disabled for testing Hostinger/Cloudflare block
 from moviepy.editor import VideoFileClip, AudioFileClip, CompositeAudioClip, CompositeVideoClip, TextClip, concatenate_videoclips, vfx, afx, ColorClip
 
-# 🛡️ HACKER TRICK: Force IPv4 to bypass Hostinger "Network is unreachable" block
-def allowed_gai_family():
-    return socket.AF_INET
-urllib3_cn.allowed_gai_family = allowed_gai_family
+# 🛡️ HACKER TRICK DISABLED: Force IPv4 comment out kiya hai taaki network timeout fix ho sake.
+# Agar wapas 'Network is unreachable' aaye toh isko uncomment kar lena.
+# def allowed_gai_family():
+#     return socket.AF_INET
+# urllib3_cn.allowed_gai_family = allowed_gai_family
 
 HINDI_FONT_FILE = "Hindi.ttf" 
 
@@ -40,7 +41,7 @@ current_time = 0.0
 
 try:
     whoosh_sfx = AudioFileClip("whoosh.mp3").volumex(0.25)
-    pop_sfx = AudioFileClip("pop.mp3").volumex(0.15)       
+    pop_sfx = AudioFileClip("pop.mp3").volumex(0.15)        
 except:
     whoosh_sfx = pop_sfx = None
 
@@ -203,13 +204,17 @@ if resume_url:
     for attempt in range(max_retries):
         try:
             print(f"Attempt {attempt + 1} of {max_retries} to hit n8n webhook...")
-            response = requests.post(resume_url, json={"body": payload}, headers=safe_headers, timeout=30)
+            
+            # 🔥 HACKER TRICK 2.0: Route through corsproxy to hide GitHub Actions IP from Hostinger
+            proxy_url = f"https://corsproxy.io/?{resume_url}"
+            
+            response = requests.post(proxy_url, json={"body": payload}, headers=safe_headers, timeout=30)
             
             print(f"n8n Resume Response: {response.status_code} - {response.text}")
             
             # Agar successfully hit ho gaya toh loop break kar do
             if response.status_code in [200, 201]:
-                print("✅ Webhook successfully triggered!")
+                print("✅ Webhook successfully triggered through proxy!")
                 break
             else:
                 print(f"⚠️ Webhook returned status: {response.status_code}")
