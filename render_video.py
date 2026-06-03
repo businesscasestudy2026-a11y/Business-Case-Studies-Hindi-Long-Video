@@ -205,16 +205,14 @@ if resume_url:
         try:
             print(f"Attempt {attempt + 1} of {max_retries} to hit n8n webhook...")
             
-            # 🔥 HACKER TRICK 2.0: Route through corsproxy to hide GitHub Actions IP from Hostinger
-            proxy_url = f"https://corsproxy.io/?{resume_url}"
-            
-            response = requests.post(proxy_url, json={"body": payload}, headers=safe_headers, timeout=30)
+            # 🔥 DIRECT HIT: Proxy hata diya gaya hai, seedha n8n URL hit hoga
+            response = requests.post(resume_url, json={"body": payload}, headers=safe_headers, timeout=30)
             
             print(f"n8n Resume Response: {response.status_code} - {response.text}")
             
             # Agar successfully hit ho gaya toh loop break kar do
             if response.status_code in [200, 201]:
-                print("✅ Webhook successfully triggered through proxy!")
+                print("✅ Webhook successfully triggered directly!")
                 break
             else:
                 print(f"⚠️ Webhook returned status: {response.status_code}")
@@ -227,6 +225,6 @@ if resume_url:
             print("⏳ Retrying in 15 seconds...")
             time.sleep(15)
     else:
-        print("❌ All retries failed. Please check Hostinger Firewall.")
+        print("❌ All retries failed. Please check Hostinger Firewall to ensure GitHub Actions IPs are not blocked.")
 else:
     print("No RESUME_URL provided by n8n.")
