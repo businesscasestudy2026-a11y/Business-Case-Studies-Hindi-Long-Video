@@ -1,6 +1,6 @@
 import os, requests, json, subprocess, gc, random
 import moviepy.editor as mpe
-from moviepy.editor import VideoFileClip, AudioFileClip, ColorClip
+from moviepy.editor import VideoFileClip, AudioFileClip, ColorClip, CompositeVideoClip
 
 # --- Configuration ---
 chat_id = os.environ.get('CHAT_ID')
@@ -30,7 +30,6 @@ for i, scene in enumerate(scenes_data):
 
     try:
         aclip = AudioFileClip(raw_audio_path)
-        # Remove initial dead silence for fast pacing
         if aclip.duration > 0.3:
             aclip = aclip.subclip(0.1)
         scene_duration = aclip.duration
@@ -58,7 +57,7 @@ for i, scene in enumerate(scenes_data):
     except:
         video_url = "https://player.vimeo.com/external/372064106.sd.mp4?s=d4052309831778170d62" 
 
-    # --- 3. Dynamic Video Normalization (The Retention Hack) ---
+    # --- 3. Dynamic Video Normalization (THE BLACK SCREEN FIX) ---
     norm_video_path = f"video_{i}.mp4"
     try:
         raw_vid_path = f"raw_vid_{i}.mp4"
@@ -75,28 +74,35 @@ for i, scene in enumerate(scenes_data):
 
         vclip = vclip.resize(height=TARGET_H).crop(x_center=vclip.w/2, y_center=vclip.h/2, width=TARGET_W, height=TARGET_H)
         
-        # 🔥 RANDOMIZED MOTION HACK (Boosts Retention) 🔥
         motion_type = random.choice(['zoom_in', 'zoom_out', 'pan_left', 'pan_right'])
-        zoom_factor = 1.06 # 6% subtle movement
+        zoom_factor = 1.06 
         
         if motion_type == 'zoom_in':
-            zoomed_clip = vclip.resize(lambda t: 1.0 + (zoom_factor - 1.0) * (t / scene_duration))
+            z_clip = vclip.resize(lambda t: 1.0 + (zoom_factor - 1.0) * (t / scene_duration))
+            z_clip = z_clip.set_position(('center', 'center'))
         elif motion_type == 'zoom_out':
-            zoomed_clip = vclip.resize(lambda t: zoom_factor - (zoom_factor - 1.0) * (t / scene_duration))
-        elif motion_type == 'pan_right':
-            zoomed_clip = vclip.resize(zoom_factor).set_position(lambda t: ('center', 'center')) # Simple placeholder for stability
+            z_clip = vclip.resize(lambda t: zoom_factor - (zoom_factor - 1.0) * (t / scene_duration))
+            z_clip = z_clip.set_position(('center', 'center'))
+        elif motion_type == 'pan_left':
+            z_clip = vclip.resize(zoom_factor)
+            z_clip = z_clip.set_position(lambda t: (-115 * (t / scene_duration), 'center'))
         else:
-            zoomed_clip = vclip.resize(lambda t: 1.0 + 0.04 * (t / scene_duration)) # Default safe zoom
+            z_clip = vclip.resize(zoom_factor)
+            z_clip = z_clip.set_position(lambda t: (-115 + 115 * (t / scene_duration), 'center'))
 
-        zoomed_clip.write_videofile(norm_video_path, fps=24, codec="libx264", audio=False, preset="ultrafast", logger=None)
+        # 🔥 STRICT RESOLUTION LOCK: Forces exact 1920x1080 🔥
+        final_scene = CompositeVideoClip([z_clip], size=(TARGET_W, TARGET_H)).set_duration(scene_duration)
+
+        # Force identical pixel format and SAR so FFmpeg concat never fails
+        final_scene.write_videofile(norm_video_path, fps=24, codec="libx264", audio=False, preset="ultrafast", ffmpeg_params=['-pix_fmt', 'yuv420p', '-vf', 'setsar=1'], logger=None)
 
         vclip.close()
-        zoomed_clip.close()
+        final_scene.close()
         if os.path.exists(raw_vid_path): os.remove(raw_vid_path)
     except Exception as e:
         print(f"Error on scene {i}: {e}")
         cclip = ColorClip(size=(TARGET_W, TARGET_H), color=(30, 30, 30)).set_duration(scene_duration)
-        cclip.write_videofile(norm_video_path, fps=24, codec="libx264", audio=False, preset="ultrafast", logger=None)
+        cclip.write_videofile(norm_video_path, fps=24, codec="libx264", audio=False, preset="ultrafast", ffmpeg_params=['-pix_fmt', 'yuv420p', '-vf', 'setsar=1'], logger=None)
         cclip.close()
 
     video_files.append(norm_video_path)
@@ -132,8 +138,8 @@ if has_bgm:
 else:
     audio_map = "1:a"
 
-# 🔥 ANTI-DEMONETIZATION HACK: Apply Color Contrast + Vignette (Makes video unique) 🔥
-filter_complex += "[0:v]eq=contrast=1.05:saturation=1.15,vignette=PI/4[v_graded]; "
+# Safe Anti-Demonetization Grade
+filter_complex += "[0:v]eq=contrast=1.05:saturation=1.15,vignette[v_graded]; "
 current_v_map = "[v_graded]"
 
 if has_logo:
