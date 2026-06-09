@@ -2,7 +2,6 @@ import os, requests, json, subprocess
 import moviepy.editor as mpe
 from moviepy.editor import VideoFileClip, AudioFileClip, CompositeAudioClip, CompositeVideoClip, concatenate_videoclips, vfx, afx, ColorClip, ImageClip
 
-# FULL_TEXT ki ab yahan zaroorat nahi kyunki hum har scene ka alag TTS banayenge
 chat_id = os.environ.get('CHAT_ID')
 pexels_key = os.environ.get('PEXELS_API_KEY')
 scenes_data = json.loads(os.environ.get('SCENES_DATA', '[]'))
@@ -19,6 +18,9 @@ audio_clips = []
 headers = {"Authorization": pexels_key}
 current_time = 0.0
 
+# 🔥 IMPROVEMENT: Duplicate videos se bachne ke liye tracking set
+used_videos = set()
+
 try:
     whoosh_sfx = AudioFileClip("whoosh.mp3").volumex(0.25)
     pop_sfx = AudioFileClip("pop.mp3").volumex(0.15)        
@@ -26,58 +28,93 @@ except:
     whoosh_sfx = pop_sfx = None
 
 TARGET_W, TARGET_H = 1920, 1080
+CROSSFADE_DUR = 0.5  
 
 for i, scene in enumerate(scenes_data):
-    keyword = scene.get('keyword', 'business')
+    keyword = scene.get('keyword', 'business').strip()
     text_line = scene.get('text', ' ').strip()
     if not text_line: text_line = " "
     
-    # 🔥 IMPROVEMENT 1: Scene-by-Scene Perfect Audio Sync 🔥
+    # 1. Perfect Scene-by-Scene Audio Sync
     scene_audio_path = f"voiceover_{i}.mp3"
     subprocess.run(['edge-tts', '--voice', 'hi-IN-MadhurNeural', '--text', text_line, '--write-media', scene_audio_path])
     
     try:
         scene_voiceover = AudioFileClip(scene_audio_path)
-        # MadhurNeural ki starting silence trim karna
         if scene_voiceover.duration > 0.5:
             scene_voiceover = scene_voiceover.subclip(0.1)
     except:
         print(f"⚠️ TTS Error on scene {i}. Skipping audio for this scene.")
         scene_voiceover = None
 
-    # Scene duration strictly audio ke barabar hogi
     scene_duration = scene_voiceover.duration if scene_voiceover else 2.0
     if scene_duration < 1.0: scene_duration = 1.0
+    
+    visual_duration = scene_duration + CROSSFADE_DUR
     
     if scene_voiceover:
         audio_clips.append(scene_voiceover.set_start(current_time))
     
     clip_to_close = None
+    video_url = None
     
     try:
-        res = requests.get(f"https://api.pexels.com/videos/search?query={keyword}&per_page=1&orientation=landscape", headers=headers, timeout=15).json()
-        if not res.get('videos'):
-            raise ValueError(f"No videos found on Pexels for keyword: '{keyword}'")
+        # 🔥 IMPROVEMENT: Top 15 videos mangao taaki choices hon
+        res = requests.get(f"https://api.pexels.com/videos/search?query={keyword}&per_page=15&orientation=landscape", headers=headers, timeout=15).json()
+        
+        if res.get('videos') and len(res['videos']) > 0:
+            # Jo video pehle use nahi hui, use select karo
+            for v in res['videos']:
+                potential_url = v['video_files'][0]['link']
+                if potential_url not in used_videos:
+                    video_url = potential_url
+                    used_videos.add(video_url)
+                    break
             
-        video_url = res['videos'][0]['video_files'][0]['link']
+            # Fallback agar saari ki saari 15 videos already use ho chuki hain
+            if not video_url:
+                video_url = res['videos'][0]['video_files'][0]['link']
+                
+        # Smart Keyword Fallback (Agar main keyword par koi video na mile)
+        if not video_url:
+            print(f"⚠️ Keyword '{keyword}' failed. Trying safe business fallback...")
+            fallback_res = requests.get(f"https://api.pexels.com/videos/search?query=business startup&per_page=15&orientation=landscape", headers=headers, timeout=15).json()
+            if fallback_res.get('videos'):
+                for v in fallback_res['videos']:
+                    potential_url = v['video_files'][0]['link']
+                    if potential_url not in used_videos:
+                        video_url = potential_url
+                        used_videos.add(video_url)
+                        break
+                if not video_url:
+                    video_url = fallback_res['videos'][0]['video_files'][0]['link']
+
+        if not video_url:
+            raise ValueError("No video found on primary and fallback search.")
+
         vid_path = f"vid_{i}.mp4"
         with open(vid_path, "wb") as f:
             f.write(requests.get(video_url, timeout=30).content)
             
-        clip = VideoFileClip(vid_path).subclip(0, scene_duration)
+        clip = VideoFileClip(vid_path)
+        if clip.duration < visual_duration:
+            clip = clip.fx(vfx.loop, duration=visual_duration)
+        else:
+            clip = clip.subclip(0, visual_duration)
+            
         clip_to_close = clip
         clip = clip.resize(height=TARGET_H)
         if clip.w < TARGET_W:
             clip = clip.resize(width=TARGET_W)
         clip = clip.crop(x_center=clip.w/2, y_center=clip.h/2, width=TARGET_W, height=TARGET_H)
         
-        zoomed_clip = clip.resize(lambda t: 1.0 + 0.04 * (t / scene_duration)).set_position(('center', 'center'))
+        zoomed_clip = clip.resize(lambda t: 1.0 + 0.04 * (t / visual_duration)).set_position(('center', 'center'))
         
     except Exception as e:
-        print(f"⚠️ API/Download Error on scene {i} '{keyword}': {e}. Using fallback background.")
-        zoomed_clip = ColorClip(size=(TARGET_W, TARGET_H), color=(20, 20, 20)).set_duration(scene_duration)
+        print(f"⚠️ Pexels Error on scene {i} '{keyword}': {e}. Using solid background.")
+        zoomed_clip = ColorClip(size=(TARGET_W, TARGET_H), color=(20, 20, 20)).set_duration(visual_duration)
 
-    final_scene = CompositeVideoClip([zoomed_clip], size=(TARGET_W, TARGET_H)).set_duration(scene_duration)
+    final_scene = CompositeVideoClip([zoomed_clip], size=(TARGET_W, TARGET_H)).set_duration(visual_duration)
     
     temp_scene_path = f"temp_scene_{i}.mp4"
     final_scene.write_videofile(temp_scene_path, fps=24, codec="libx264", audio=False, preset="ultrafast", threads=2)
@@ -94,8 +131,15 @@ for i, scene in enumerate(scenes_data):
     current_time += scene_duration
     print(f"Scene {i+1} Ready & Saved: {keyword}")
 
-loaded_clips = [VideoFileClip(path) for path in rendered_scene_paths]
-final_video = concatenate_videoclips(loaded_clips, method="compose")
+# 2. Cinematic Crossfade Transitions
+loaded_clips = []
+for i, path in enumerate(rendered_scene_paths):
+    c = VideoFileClip(path)
+    if i > 0:
+        c = c.fx(vfx.crossfadein, CROSSFADE_DUR)
+    loaded_clips.append(c)
+
+final_video = concatenate_videoclips(loaded_clips, padding=-CROSSFADE_DUR, method="compose")
 
 final_duration = final_video.duration
 progress_bar = ColorClip(size=(TARGET_W, 15), color=(255, 0, 0))
@@ -114,25 +158,44 @@ try:
 except Exception as e:
     pass
 
-try:
-    bgm = AudioFileClip("bgm.mp3").volumex(0.32)
-    if bgm.duration < final_video.duration: bgm = afx.audio_loop(bgm, duration=final_video.duration)
-    else: bgm = bgm.subclip(0, final_video.duration)
-    audio_clips.append(bgm)
-except: pass
+print("Exporting Voiceover Track...")
+final_voice_audio = CompositeAudioClip(audio_clips)
+final_voice_audio.write_audiofile("voice_merged.wav", fps=44100)
 
-final_audio = CompositeAudioClip(audio_clips)
-final_video = final_video.set_audio(final_audio)
-
-print("Rendering Final COMPRESSED LONG Video...")
-final_video.write_videofile("final_video.mp4", fps=24, codec="libx264", audio_codec="aac", threads=2, bitrate="1000k", preset="ultrafast")
+print("Rendering Visuals (No Audio)...")
+final_video.write_videofile("temp_video_no_audio.mp4", fps=24, codec="libx264", audio=False, preset="ultrafast", threads=2)
 
 final_video.close()
 for c in loaded_clips:
     c.close()
 
-video_link = "Upload Failed"
+# 3. Smart Audio Ducking using FFmpeg
+print("Applying Cinematic Audio Ducking & Finalizing Video...")
+if os.path.exists("bgm.mp3"):
+    studio_filter = "[1:a]asplit=2[voice_main][voice_control];[2:a]volume=0.3[bgm_low];[bgm_low][voice_control]sidechaincompress=threshold=0.08:ratio=8:attack=200:release=1000[ducked_bgm];[voice_main][ducked_bgm]amix=inputs=2:duration=first[aout]"
+    
+    subprocess.run([
+        'ffmpeg', '-y',
+        '-i', 'temp_video_no_audio.mp4',
+        '-i', 'voice_merged.wav',
+        '-stream_loop', '-1', '-i', 'bgm.mp3',
+        '-filter_complex', studio_filter,
+        '-map', '0:v', '-map', '[aout]',
+        '-c:v', 'copy', 
+        '-c:a', 'aac', '-b:a', '192k',
+        '-shortest', 'final_video.mp4'
+    ], check=True)
+else:
+    subprocess.run([
+        'ffmpeg', '-y',
+        '-i', 'temp_video_no_audio.mp4',
+        '-i', 'voice_merged.wav',
+        '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k',
+        'final_video.mp4'
+    ], check=True)
 
+# Upload System
+video_link = "Upload Failed"
 try:
     res = requests.post("https://tmpfiles.org/api/v1/upload", files={'file': open('final_video.mp4', 'rb')}, timeout=600)
     if res.status_code == 200: video_link = res.json()['data']['url'].replace('tmpfiles.org/', 'tmpfiles.org/dl/')
