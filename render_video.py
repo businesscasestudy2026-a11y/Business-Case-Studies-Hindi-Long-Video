@@ -13,8 +13,9 @@ scenes_data = json.loads(os.environ.get('SCENES_DATA', '[]'))
 video_title = os.environ.get('TITLE', 'Business Case Study')
 thumbnail_prompt = os.environ.get('THUMBNAIL_PROMPT', 'Cinematic business thumbnail')
 video_desc = os.environ.get('DESCRIPTION', 'Business case study video.')
-# Apna Telegram Bot token yahan daalein (Ya env variable se lein)
-bot_token = os.environ.get('TELEGRAM_BOT_TOKEN', '8870266304:AAHHYfQvtQEWMIEzMfdEc7i_9hIzj7nz0Zg')
+
+# Naya Telegram Bot Token
+bot_token = os.environ.get('TELEGRAM_BOT_TOKEN', '8798779179:AAH53t28qW6g7QTsB8nGCEswNJz2DXR9ssU')
 
 print(f"Total Scenes to render: {len(scenes_data)}")
 
