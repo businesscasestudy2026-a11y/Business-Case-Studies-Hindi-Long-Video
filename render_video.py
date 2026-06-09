@@ -1,24 +1,21 @@
 import os, requests, json, subprocess, socket, time
 import moviepy.editor as mpe
-from moviepy.editor import VideoFileClip, AudioFileClip, CompositeAudioClip, CompositeVideoClip, TextClip, concatenate_videoclips, vfx, afx, ColorClip
+from moviepy.editor import VideoFileClip, AudioFileClip, CompositeAudioClip, CompositeVideoClip, concatenate_videoclips, vfx, afx, ColorClip
 
-HINDI_FONT_FILE = "Hindi.ttf" 
-
-full_text = os.environ.get('FULL_TEXT', 'Ek baar ki baat hai.')
+full_text = os.environ.get('FULL_TEXT', 'एक बार की बात है।')
 chat_id = os.environ.get('CHAT_ID')
 pexels_key = os.environ.get('PEXELS_API_KEY')
 scenes_data = json.loads(os.environ.get('SCENES_DATA', '[]'))
 
-# Naye environment variables (GitHub Action se aayenge)
+# Naye environment variables
 video_title = os.environ.get('TITLE', 'Business Case Study')
 thumbnail_prompt = os.environ.get('THUMBNAIL_PROMPT', 'Cinematic business thumbnail')
 video_desc = os.environ.get('DESCRIPTION', 'Business case study video.')
-
-# Naya Telegram Bot Token
 bot_token = os.environ.get('TELEGRAM_BOT_TOKEN', '8798779179:AAH53t28qW6g7QTsB8nGCEswNJz2DXR9ssU')
 
 print(f"Total Scenes to render: {len(scenes_data)}")
 
+# Text to Speech generation
 subprocess.run(['edge-tts', '--voice', 'hi-IN-MadhurNeural', '--text', full_text, '--write-media', 'voiceover.mp3'])
 
 raw_voiceover = AudioFileClip("voiceover.mp3")
@@ -40,7 +37,6 @@ try:
 except:
     whoosh_sfx = pop_sfx = None
 
-viral_colors = ['#FFD400', '#00FFFF', '#FFFFFF', '#39FF14'] 
 TARGET_W, TARGET_H = 1920, 1080
 
 for i, scene in enumerate(scenes_data):
@@ -74,23 +70,8 @@ for i, scene in enumerate(scenes_data):
         print(f"⚠️ API/Download Error on scene {i} '{keyword}': {e}. Using fallback background.")
         zoomed_clip = ColorClip(size=(TARGET_W, TARGET_H), color=(20, 20, 20)).set_duration(scene_duration)
 
-    dark_overlay = ColorClip(size=(TARGET_W, TARGET_H), color=(0,0,0)).set_opacity(0.35).set_position(('center', 'center')).set_duration(scene_duration)
-    
-    words = text_line.split(' ')
-    chunk_size = 3
-    chunks = [' '.join(words[j:j + chunk_size]) for j in range(0, len(words), chunk_size)]
-    word_clips = []
-    duration_per_chunk = scene_duration / len(chunks)
-    
-    for w_i, chunk in enumerate(chunks):
-        current_color = viral_colors[w_i % len(viral_colors)]
-        bg_txt = TextClip(chunk, fontsize=100, color='black', font=HINDI_FONT_FILE, stroke_color='black', stroke_width=15, method='caption', size=(1600, None))
-        bg_txt = bg_txt.set_position(('center', 'center')).set_duration(duration_per_chunk).set_start(w_i * duration_per_chunk)
-        main_txt = TextClip(chunk, fontsize=100, color=current_color, font=HINDI_FONT_FILE, stroke_color='black', stroke_width=3, method='caption', size=(1600, None))
-        main_txt = main_txt.set_position(('center', 'center')).set_duration(duration_per_chunk).set_start(w_i * duration_per_chunk)
-        word_clips.extend([bg_txt, main_txt])
-    
-    final_scene = CompositeVideoClip([zoomed_clip, dark_overlay] + word_clips, size=(TARGET_W, TARGET_H)).set_duration(scene_duration)
+    # TEXT REMOVED: Ab sirf clean B-roll video render hoga
+    final_scene = CompositeVideoClip([zoomed_clip], size=(TARGET_W, TARGET_H)).set_duration(scene_duration)
     
     temp_scene_path = f"temp_scene_{i}.mp4"
     final_scene.write_videofile(temp_scene_path, fps=24, codec="libx264", audio=False, preset="ultrafast", threads=2)
@@ -98,9 +79,6 @@ for i, scene in enumerate(scenes_data):
     
     final_scene.close()
     zoomed_clip.close()
-    dark_overlay.close()
-    for wc in word_clips:
-        wc.close()
     if clip_to_close:
         clip_to_close.close()
     
@@ -113,6 +91,7 @@ for i, scene in enumerate(scenes_data):
 loaded_clips = [VideoFileClip(path) for path in rendered_scene_paths]
 final_video = concatenate_videoclips(loaded_clips, method="compose")
 
+# Niche ek choti si red progress bar chhod di hai retention ke liye
 final_duration = final_video.duration
 progress_bar = ColorClip(size=(TARGET_W, 15), color=(255, 0, 0))
 progress_bar = progress_bar.set_position(lambda t: (-TARGET_W + int(TARGET_W * (t / max(final_duration, 1))), 'bottom'))
@@ -154,7 +133,7 @@ if not video_link.startswith("http"):
 
 print(f"🔥 FINAL VIDEO LINK: {video_link} 🔥")
 
-# IF LOOP MAGIC: Send piped message to Telegram to trigger n8n
+# Telegram trigger for n8n
 try:
     final_msg = f"READY_TO_UPLOAD|{video_link}|{video_title}|{thumbnail_prompt}|{video_desc}"
     requests.post(f"https://api.telegram.org/bot{bot_token}/sendMessage", json={"chat_id": chat_id, "text": final_msg})
