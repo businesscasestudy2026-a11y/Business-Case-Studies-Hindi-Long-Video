@@ -18,7 +18,7 @@ audio_clips = []
 headers = {"Authorization": pexels_key}
 current_time = 0.0
 
-# 🔥 IMPROVEMENT: Duplicate videos se bachne ke liye tracking set
+# Duplicate videos se bachne ke liye tracking set
 used_videos = set()
 
 try:
@@ -50,6 +50,7 @@ for i, scene in enumerate(scenes_data):
     scene_duration = scene_voiceover.duration if scene_voiceover else 2.0
     if scene_duration < 1.0: scene_duration = 1.0
     
+    # Crossfade padding ke liye visual duration badhana
     visual_duration = scene_duration + CROSSFADE_DUR
     
     if scene_voiceover:
@@ -59,11 +60,10 @@ for i, scene in enumerate(scenes_data):
     video_url = None
     
     try:
-        # 🔥 IMPROVEMENT: Top 15 videos mangao taaki choices hon
+        # Pexels se top 15 videos mangana matching fresh clips ke liye
         res = requests.get(f"https://api.pexels.com/videos/search?query={keyword}&per_page=15&orientation=landscape", headers=headers, timeout=15).json()
         
         if res.get('videos') and len(res['videos']) > 0:
-            # Jo video pehle use nahi hui, use select karo
             for v in res['videos']:
                 potential_url = v['video_files'][0]['link']
                 if potential_url not in used_videos:
@@ -71,11 +71,10 @@ for i, scene in enumerate(scenes_data):
                     used_videos.add(video_url)
                     break
             
-            # Fallback agar saari ki saari 15 videos already use ho chuki hain
             if not video_url:
                 video_url = res['videos'][0]['video_files'][0]['link']
                 
-        # Smart Keyword Fallback (Agar main keyword par koi video na mile)
+        # Smart Keyword Fallback logic
         if not video_url:
             print(f"⚠️ Keyword '{keyword}' failed. Trying safe business fallback...")
             fallback_res = requests.get(f"https://api.pexels.com/videos/search?query=business startup&per_page=15&orientation=landscape", headers=headers, timeout=15).json()
@@ -131,12 +130,13 @@ for i, scene in enumerate(scenes_data):
     current_time += scene_duration
     print(f"Scene {i+1} Ready & Saved: {keyword}")
 
-# 2. Cinematic Crossfade Transitions
+# 2. FIXED: Cinematic Crossfade Transitions logic
 loaded_clips = []
 for i, path in enumerate(rendered_scene_paths):
     c = VideoFileClip(path)
     if i > 0:
-        c = c.fx(vfx.crossfadein, CROSSFADE_DUR)
+        # AttributeError fix: Direct method ka call kiya vfx attribute ke bajay
+        c = c.crossfadein(CROSSFADE_DUR)
     loaded_clips.append(c)
 
 final_video = concatenate_videoclips(loaded_clips, padding=-CROSSFADE_DUR, method="compose")
