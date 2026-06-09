@@ -22,14 +22,12 @@ last_successful_media = None
 
 print(f"Total Scenes to render: {len(scenes_data)}")
 
-# --- Robust File Upload System ---
 def upload_file(file_path):
     try:
         res = requests.post("https://tmpfiles.org/api/v1/upload", files={'file': open(file_path, 'rb')}, timeout=1200)
         return res.json()['data']['url'].replace('tmpfiles.org/', 'tmpfiles.org/dl/')
     except: return "Failed"
 
-# --- Smart Pexels Fetcher ---
 def get_pexels_video(query):
     try:
         res = requests.get(f"https://api.pexels.com/videos/search?query={query}&per_page=15&orientation=landscape", headers={"Authorization": pexels_key}, timeout=15).json()
@@ -46,9 +44,11 @@ def get_pexels_video(query):
 # --- Main Video Processing Loop ---
 for i, scene in enumerate(scenes_data):
     keyword = scene.get('keyword', 'business').strip()
+    # 🔥 Naya AI Visual Prompt Engine 🔥
+    image_prompt = scene.get('image_prompt', keyword).strip()
     text_line = scene.get('text', ' ').strip() or " "
 
-    # --- 1. Audio Pipeline (Dead-Air Removal + Studio EQ) ---
+    # --- 1. Audio Pipeline ---
     raw_audio_path = f"raw_audio_{i}.mp3"
     norm_audio_path = f"audio_{i}.wav"
     subprocess.run(['edge-tts', '--voice', 'hi-IN-MadhurNeural', '--text', text_line, '--write-media', raw_audio_path])
@@ -70,20 +70,19 @@ for i, scene in enumerate(scenes_data):
 
     audio_files.append(final_audio_path)
 
-    # --- 2. Smart Visual Fetching ---
+    # --- 2. Smart Visual Fetching (Exact Match Logic) ---
     video_url = get_pexels_video(keyword)
-    is_ai_image = False
     norm_video_path = f"video_{i}.mp4"
     raw_media_path = f"raw_media_{i}.mp4"
     
     try:
+        # Pexels se generic keywords ke liye video mangao
         if video_url:
             req = requests.get(video_url, timeout=45)
             with open(raw_media_path, "wb") as f: f.write(req.content)
             vclip = VideoFileClip(raw_media_path)
             
             vclip = vclip.fx(vfx.speedx, 1.2)
-            
             if vclip.duration < scene_duration:
                 vclip = vclip.fx(vfx.loop, duration=scene_duration)
             else:
@@ -91,16 +90,18 @@ for i, scene in enumerate(scenes_data):
             last_successful_media = {"type": "video", "path": raw_media_path}
 
         else:
-            is_ai_image = True
+            # 🔥 Agar video na mile, toh EXACT matching cinematic image banao 🔥
+            print(f"⚠️ Precise Match: Generating AI Image for '{image_prompt}'")
             raw_media_path = f"raw_media_{i}.jpg"
-            ai_prompt = urllib.parse.quote(f"Cinematic {keyword}, hyper-realistic, 8k, highly detailed, dramatic lighting")
-            img_url = f"https://image.pollinations.ai/prompt/{ai_prompt}?width=1920&height=1080&nologo=true"
+            ai_prompt_encoded = urllib.parse.quote(f"Epic cinematic concept art, {image_prompt}, highly detailed, 8k resolution, Unreal Engine 5 render, dramatic contrast, pure textless photograph, no typography")
+            img_url = f"https://image.pollinations.ai/prompt/{ai_prompt_encoded}?width=1920&height=1080&nologo=true"
             
             req = requests.get(img_url, timeout=45)
             with open(raw_media_path, "wb") as f: f.write(req.content)
             vclip = ImageClip(raw_media_path).set_duration(scene_duration)
             last_successful_media = {"type": "image", "path": raw_media_path}
 
+        # Screen Normalization
         if (vclip.w / vclip.h) > (TARGET_W / TARGET_H):
             vclip = vclip.resize(height=TARGET_H)
         else:
@@ -108,9 +109,9 @@ for i, scene in enumerate(scenes_data):
             
         vclip = vclip.crop(x_center=vclip.w/2, y_center=vclip.h/2, width=TARGET_W, height=TARGET_H)
         
+        # Smooth Motion
         motion_type = random.choice(['zoom_in', 'zoom_out'])
         zoom_factor = 1.05 
-        
         if motion_type == 'zoom_in':
             z_clip = vclip.resize(lambda t: 1.0 + (zoom_factor - 1.0) * (t / scene_duration)).set_position(('center', 'center'))
         else:
@@ -155,7 +156,7 @@ with open("aud_list.txt", "w") as f:
 subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', 'vid_list.txt', '-c', 'copy', 'merged_video.mp4'], check=True)
 subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', 'aud_list.txt', '-c', 'copy', 'merged_audio.wav'], check=True)
 
-# --- 4. Final Master Mix (Grain + Grade + Ducking + LUFS Normalization + Bottom-Right Text) ---
+# --- 4. Final Master Mix (Grade + Ducking + LUFS Normalization + Bottom-Right Text) ---
 has_logo = os.path.exists("logo.png")
 has_bgm = os.path.exists("bgm.mp3")
 
@@ -176,7 +177,6 @@ else:
 
 channel_name = "Business Case Studies"
 
-# 🔥 FIX: Positioned text to Bottom-Right (x=W-tw-50, y=H-th-50)
 filter_complex += f"[0:v]eq=contrast=1.05:saturation=1.15,vignette,noise=alls=1:allf=t+u,drawtext=text='{channel_name}':fontcolor=white@0.5:fontsize=45:x=W-tw-50:y=H-th-50[v_graded]; "
 current_v_map = "[v_graded]"
 
@@ -197,7 +197,7 @@ ffmpeg_cmd.extend([
 ])
 subprocess.run(ffmpeg_cmd, check=True)
 
-# --- 5. Final Upload & Telegram Notification ---
+# --- 5. Final Upload ---
 def upload_file(file_path):
     try:
         res = requests.post("https://tmpfiles.org/api/v1/upload", files={'file': open(file_path, 'rb')}, timeout=1200)
