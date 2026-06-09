@@ -17,7 +17,6 @@ jobs:
         with:
           python-version: '3.10'
 
-      # 🚀 MEMORY FIX: Using a dedicated GitHub Action to safely create swap space
       - name: Set up swap space
         uses: pierotofy/set-swap-space@master
         with:
@@ -27,13 +26,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg imagemagick
-          # ImageMagick policy fix so MoviePy can generate TextClips properly
           sudo sed -i 's/none/read,write/g' /etc/ImageMagick-6/policy.xml
 
       - name: Install Python Dependencies
         run: |
           python -m pip install --upgrade pip
-          # FIX YAHAN HAI: Pillow==9.5.0 add kiya gaya hai ANTIALIAS error theek karne ke liye
           pip install moviepy==1.0.3 requests edge-tts urllib3 Pillow==9.5.0
 
       - name: Run Video Rendering Script
@@ -41,7 +38,8 @@ jobs:
           FULL_TEXT: ${{ github.event.client_payload.full_text }}
           SCENES_DATA: ${{ github.event.client_payload.scenes_data }}
           CHAT_ID: ${{ github.event.client_payload.chat_id }}
+          TITLE: ${{ github.event.client_payload.title }}
+          DESCRIPTION: ${{ github.event.client_payload.description }}
           THUMBNAIL_PROMPT: ${{ github.event.client_payload.thumbnail_prompt }}
-          RESUME_URL: ${{ github.event.client_payload.resume_url }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }} 
         run: python -u render_video.py
