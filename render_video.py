@@ -1,6 +1,8 @@
 import os, requests, json, subprocess, gc, random
+import urllib.parse
 import moviepy.editor as mpe
-from moviepy.editor import VideoFileClip, AudioFileClip, ColorClip, CompositeVideoClip
+from moviepy.editor import VideoFileClip, AudioFileClip, ColorClip, CompositeVideoClip, ImageClip
+import moviepy.video.fx.all as vfx
 
 # --- Configuration ---
 chat_id = os.environ.get('CHAT_ID')
@@ -16,8 +18,16 @@ TARGET_W, TARGET_H = 1920, 1080
 used_videos = set()
 video_files = []
 audio_files = []
+last_successful_media = None  # 🔥 Memory for Anti-Black Screen 🔥
 
 print(f"Total Scenes to render: {len(scenes_data)}")
+
+# --- Robust File Upload System ---
+def upload_file(file_path):
+    try:
+        res = requests.post("https://tmpfiles.org/api/v1/upload", files={'file': open(file_path, 'rb')}, timeout=1200)
+        return res.json()['data']['url'].replace('tmpfiles.org/', 'tmpfiles.org/dl/')
+    except: return "Failed"
 
 # --- Smart Pexels Fetcher ---
 def get_pexels_video(query):
@@ -33,30 +43,21 @@ def get_pexels_video(query):
     except:
         return None
 
-# --- SRT Time Formatter ---
-def format_srt_time(seconds):
-    hours = int(seconds // 3600)
-    minutes = int((seconds % 3600) // 60)
-    secs = int(seconds % 60)
-    millis = int((seconds - int(seconds)) * 1000)
-    return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
-
-srt_content = ""
-current_srt_time = 0.0
-
+# --- Main Video Processing Loop ---
 for i, scene in enumerate(scenes_data):
     keyword = scene.get('keyword', 'business').strip()
     text_line = scene.get('text', ' ').strip() or " "
 
-    # --- 1. TTS Generation & Studio EQ Enhancement ---
+    # --- 1. Audio Pipeline (Dead-Air Removal + Studio EQ) ---
     raw_audio_path = f"raw_audio_{i}.mp3"
     norm_audio_path = f"audio_{i}.wav"
     subprocess.run(['edge-tts', '--voice', 'hi-IN-MadhurNeural', '--text', text_line, '--write-media', raw_audio_path])
 
     if os.path.exists(raw_audio_path):
-        subprocess.run(['ffmpeg', '-y', '-i', raw_audio_path, '-ss', '0.1', '-af', 'bass=g=5:f=110,treble=g=3:f=8000', '-ar', '44100', '-ac', '2', norm_audio_path], check=True)
+        audio_filter = "silenceremove=stop_periods=-1:stop_duration=0.3:stop_threshold=-35dB,bass=g=5:f=110,treble=g=3:f=8000"
+        subprocess.run(['ffmpeg', '-y', '-i', raw_audio_path, '-af', audio_filter, '-ar', '44100', '-ac', '2', norm_audio_path], check=True)
         out = subprocess.check_output(['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', norm_audio_path])
-        scene_duration = float(out.decode('utf-8').strip())
+        scene_duration = float(out.decode('utf-8').strip()) + 0.2 
     else:
         scene_duration = 3.0
         subprocess.run(['ffmpeg', '-y', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo', '-t', str(scene_duration), norm_audio_path], check=True)
@@ -69,33 +70,40 @@ for i, scene in enumerate(scenes_data):
 
     audio_files.append(final_audio_path)
 
-    # --- Subtitle Logic ---
-    start_str = format_srt_time(current_srt_time)
-    end_str = format_srt_time(current_srt_time + scene_duration)
-    srt_content += f"{i+1}\n{start_str} --> {end_str}\n{text_line}\n\n"
-    current_srt_time += scene_duration
-
-    # --- 2. Smart Pexels Fetching ---
+    # --- 2. Smart Visual Fetching ---
     video_url = get_pexels_video(keyword)
-    if not video_url: video_url = get_pexels_video('office team')
-
-    # --- 3. Dynamic Video Normalization (FIXED FREEZE ISSUE) ---
+    is_ai_image = False
     norm_video_path = f"video_{i}.mp4"
+    raw_media_path = f"raw_media_{i}.mp4"
+    
     try:
-        raw_vid_path = f"raw_vid_{i}.mp4"
-        req = requests.get(video_url, timeout=45)
-        with open(raw_vid_path, "wb") as f: f.write(req.content)
+        if video_url:
+            req = requests.get(video_url, timeout=45)
+            with open(raw_media_path, "wb") as f: f.write(req.content)
+            vclip = VideoFileClip(raw_media_path)
+            
+            # 🔥 ELITE UPGRADE: Speed Ramp (1.2x) to make slow stock videos energetic 🔥
+            vclip = vclip.fx(vfx.speedx, 1.2)
+            
+            if vclip.duration < scene_duration:
+                vclip = vclip.fx(vfx.loop, duration=scene_duration)
+            else:
+                vclip = vclip.subclip(0, scene_duration)
+            last_successful_media = {"type": "video", "path": raw_media_path}
 
-        vclip = VideoFileClip(raw_vid_path)
-        
-        # Loop video smoothly if it's shorter than audio
-        if vclip.duration < scene_duration:
-            import moviepy.video.fx.all as vfx
-            vclip = vclip.fx(vfx.loop, duration=scene_duration)
         else:
-            vclip = vclip.subclip(0, scene_duration)
+            print(f"⚠️ Pexels failed for '{keyword}'. Generating AI Image...")
+            is_ai_image = True
+            raw_media_path = f"raw_media_{i}.jpg"
+            ai_prompt = urllib.parse.quote(f"Cinematic {keyword}, hyper-realistic, 8k, highly detailed, dramatic lighting")
+            img_url = f"https://image.pollinations.ai/prompt/{ai_prompt}?width=1920&height=1080&nologo=true"
+            
+            req = requests.get(img_url, timeout=45)
+            with open(raw_media_path, "wb") as f: f.write(req.content)
+            vclip = ImageClip(raw_media_path).set_duration(scene_duration)
+            last_successful_media = {"type": "image", "path": raw_media_path}
 
-        # Smart Auto-Scaling
+        # Auto-Scaling
         if (vclip.w / vclip.h) > (TARGET_W / TARGET_H):
             vclip = vclip.resize(height=TARGET_H)
         else:
@@ -103,7 +111,6 @@ for i, scene in enumerate(scenes_data):
             
         vclip = vclip.crop(x_center=vclip.w/2, y_center=vclip.h/2, width=TARGET_W, height=TARGET_H)
         
-        # 🔥 Smooth Video Motion (No Freezing!) 🔥
         motion_type = random.choice(['zoom_in', 'zoom_out'])
         zoom_factor = 1.05 
         
@@ -113,28 +120,42 @@ for i, scene in enumerate(scenes_data):
             z_clip = vclip.resize(lambda t: zoom_factor - (zoom_factor - 1.0) * (t / scene_duration)).set_position(('center', 'center'))
 
         final_scene = CompositeVideoClip([z_clip], size=(TARGET_W, TARGET_H)).set_duration(scene_duration)
-
-        # Force identical output streams to avoid black screens
         final_scene.write_videofile(norm_video_path, fps=24, codec="libx264", audio=False, preset="ultrafast", ffmpeg_params=['-pix_fmt', 'yuv420p', '-vf', 'setsar=1'], logger=None)
 
-        vclip.close()
-        final_scene.close()
-        if os.path.exists(raw_vid_path): os.remove(raw_vid_path)
     except Exception as e:
         print(f"Error on scene {i}: {e}")
-        cclip = ColorClip(size=(TARGET_W, TARGET_H), color=(20, 20, 20)).set_duration(scene_duration)
-        cclip.write_videofile(norm_video_path, fps=24, codec="libx264", audio=False, preset="ultrafast", ffmpeg_params=['-pix_fmt', 'yuv420p', '-vf', 'setsar=1'], logger=None)
-        cclip.close()
+        # 🔥 SMART FALLBACK: Reuse previous scene media instead of black screen 🔥
+        if last_successful_media and os.path.exists(last_successful_media["path"]):
+            print("Applying Smart Visual Memory Fallback...")
+            if last_successful_media["type"] == "video":
+                fallback_clip = VideoFileClip(last_successful_media["path"]).fx(vfx.loop, duration=scene_duration)
+            else:
+                fallback_clip = ImageClip(last_successful_media["path"]).set_duration(scene_duration)
+            
+            fallback_clip = fallback_clip.resize(height=TARGET_H).crop(x_center=fallback_clip.w/2, y_center=fallback_clip.h/2, width=TARGET_W, height=TARGET_H)
+            
+            # Apply reverse motion to make it look new
+            z_clip = fallback_clip.resize(lambda t: 1.05 - (0.05) * (t / scene_duration)).set_position(('center', 'center'))
+            final_scene = CompositeVideoClip([z_clip], size=(TARGET_W, TARGET_H)).set_duration(scene_duration)
+            final_scene.write_videofile(norm_video_path, fps=24, codec="libx264", audio=False, preset="ultrafast", ffmpeg_params=['-pix_fmt', 'yuv420p', '-vf', 'setsar=1'], logger=None)
+            fallback_clip.close()
+        else:
+            # Absolute worst-case scenario
+            cclip = ColorClip(size=(TARGET_W, TARGET_H), color=(30, 30, 30)).set_duration(scene_duration)
+            cclip.write_videofile(norm_video_path, fps=24, codec="libx264", audio=False, preset="ultrafast", ffmpeg_params=['-pix_fmt', 'yuv420p', '-vf', 'setsar=1'], logger=None)
+            cclip.close()
 
+    # 🔥 STRICT MEMORY FLUSH (Prevents OOM Crashes) 🔥
+    try:
+        vclip.close()
+        z_clip.close()
+        final_scene.close()
+    except: pass
+    
     video_files.append(norm_video_path)
     gc.collect()
-    print(f"Scene {i+1} Processed")
 
-# --- Save SRT File ---
-with open("subtitles.srt", "w", encoding="utf-8") as f:
-    f.write(srt_content)
-
-# --- 4. High-Speed FFmpeg Concat ---
+# --- 3. High-Speed FFmpeg Concat ---
 with open("vid_list.txt", "w") as f:
     for vid in video_files: f.write(f"file '{vid}'\n")
 
@@ -144,7 +165,7 @@ with open("aud_list.txt", "w") as f:
 subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', 'vid_list.txt', '-c', 'copy', 'merged_video.mp4'], check=True)
 subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', 'aud_list.txt', '-c', 'copy', 'merged_audio.wav'], check=True)
 
-# --- 5. Final Master Mix (Grade + Text Watermark + Ducking) ---
+# --- 4. Final Master Mix (Grain + Grade + Ducking + LUFS Normalization) ---
 has_logo = os.path.exists("logo.png")
 has_bgm = os.path.exists("bgm.mp3")
 
@@ -156,15 +177,17 @@ inputs = 2
 
 if has_bgm:
     ffmpeg_cmd.extend(['-stream_loop', '-1', '-i', 'bgm.mp3'])
-    filter_complex += "[1:a]asplit=2[voice_main][voice_control]; [2:a]volume=0.25[bgm_low]; [bgm_low][voice_control]sidechaincompress=threshold=0.08:ratio=8:attack=200:release=1000[ducked_bgm]; [voice_main][ducked_bgm]amix=inputs=2:duration=first[a_out]; "
+    filter_complex += "[1:a]asplit=2[voice_main][voice_control]; [2:a]volume=0.25[bgm_low]; [bgm_low][voice_control]sidechaincompress=threshold=0.08:ratio=8:attack=200:release=1000[ducked_bgm]; [voice_main][ducked_bgm]amix=inputs=2:duration=first,loudnorm=I=-14:LRA=11:TP=-1.5[a_out]; "
     audio_map = "[a_out]"
     inputs += 1
 else:
-    audio_map = "1:a"
+    filter_complex += "[1:a]loudnorm=I=-14:LRA=11:TP=-1.5[a_out]; "
+    audio_map = "[a_out]"
 
-# 🔥 CHANNEL NAME TEXT + Cinematic Grade 🔥
 channel_name = "Business Case Studies"
-filter_complex += f"[0:v]eq=contrast=1.05:saturation=1.15,vignette,drawtext=text='{channel_name}':fontcolor=white@0.7:fontsize=50:x=50:y=50[v_graded]; "
+
+# Cinematic Grain (noise) + Watermark + Grade
+filter_complex += f"[0:v]eq=contrast=1.05:saturation=1.15,vignette,noise=alls=1:allf=t+u,drawtext=text='{channel_name}':fontcolor=white@0.6:fontsize=45:x=50:y=50[v_graded]; "
 current_v_map = "[v_graded]"
 
 if has_logo:
@@ -184,7 +207,7 @@ ffmpeg_cmd.extend([
 ])
 subprocess.run(ffmpeg_cmd, check=True)
 
-# --- 6. Dual Upload System ---
+# --- 5. Final Upload & Telegram Notification ---
 def upload_file(file_path):
     try:
         res = requests.post("https://tmpfiles.org/api/v1/upload", files={'file': open(file_path, 'rb')}, timeout=1200)
@@ -192,7 +215,5 @@ def upload_file(file_path):
     except: return "Failed"
 
 video_link = upload_file('final_video.mp4')
-srt_link = upload_file('subtitles.srt')
-
-final_msg = f"READY_TO_UPLOAD|{video_link}|{video_title}|{thumbnail_prompt}|{video_desc}|{srt_link}"
+final_msg = f"READY_TO_UPLOAD|{video_link}|{video_title}|{thumbnail_prompt}|{video_desc}"
 requests.post(f"https://api.telegram.org/bot{bot_token}/sendMessage", json={"chat_id": chat_id, "text": final_msg})
