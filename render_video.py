@@ -18,7 +18,7 @@ TARGET_W, TARGET_H = 1920, 1080
 used_videos = set()
 video_files = []
 audio_files = []
-last_successful_media = None  # 🔥 Memory for Anti-Black Screen 🔥
+last_successful_media = None  
 
 print(f"Total Scenes to render: {len(scenes_data)}")
 
@@ -82,7 +82,6 @@ for i, scene in enumerate(scenes_data):
             with open(raw_media_path, "wb") as f: f.write(req.content)
             vclip = VideoFileClip(raw_media_path)
             
-            # 🔥 ELITE UPGRADE: Speed Ramp (1.2x) to make slow stock videos energetic 🔥
             vclip = vclip.fx(vfx.speedx, 1.2)
             
             if vclip.duration < scene_duration:
@@ -92,7 +91,6 @@ for i, scene in enumerate(scenes_data):
             last_successful_media = {"type": "video", "path": raw_media_path}
 
         else:
-            print(f"⚠️ Pexels failed for '{keyword}'. Generating AI Image...")
             is_ai_image = True
             raw_media_path = f"raw_media_{i}.jpg"
             ai_prompt = urllib.parse.quote(f"Cinematic {keyword}, hyper-realistic, 8k, highly detailed, dramatic lighting")
@@ -103,7 +101,6 @@ for i, scene in enumerate(scenes_data):
             vclip = ImageClip(raw_media_path).set_duration(scene_duration)
             last_successful_media = {"type": "image", "path": raw_media_path}
 
-        # Auto-Scaling
         if (vclip.w / vclip.h) > (TARGET_W / TARGET_H):
             vclip = vclip.resize(height=TARGET_H)
         else:
@@ -123,29 +120,22 @@ for i, scene in enumerate(scenes_data):
         final_scene.write_videofile(norm_video_path, fps=24, codec="libx264", audio=False, preset="ultrafast", ffmpeg_params=['-pix_fmt', 'yuv420p', '-vf', 'setsar=1'], logger=None)
 
     except Exception as e:
-        print(f"Error on scene {i}: {e}")
-        # 🔥 SMART FALLBACK: Reuse previous scene media instead of black screen 🔥
         if last_successful_media and os.path.exists(last_successful_media["path"]):
-            print("Applying Smart Visual Memory Fallback...")
             if last_successful_media["type"] == "video":
                 fallback_clip = VideoFileClip(last_successful_media["path"]).fx(vfx.loop, duration=scene_duration)
             else:
                 fallback_clip = ImageClip(last_successful_media["path"]).set_duration(scene_duration)
             
             fallback_clip = fallback_clip.resize(height=TARGET_H).crop(x_center=fallback_clip.w/2, y_center=fallback_clip.h/2, width=TARGET_W, height=TARGET_H)
-            
-            # Apply reverse motion to make it look new
             z_clip = fallback_clip.resize(lambda t: 1.05 - (0.05) * (t / scene_duration)).set_position(('center', 'center'))
             final_scene = CompositeVideoClip([z_clip], size=(TARGET_W, TARGET_H)).set_duration(scene_duration)
             final_scene.write_videofile(norm_video_path, fps=24, codec="libx264", audio=False, preset="ultrafast", ffmpeg_params=['-pix_fmt', 'yuv420p', '-vf', 'setsar=1'], logger=None)
             fallback_clip.close()
         else:
-            # Absolute worst-case scenario
             cclip = ColorClip(size=(TARGET_W, TARGET_H), color=(30, 30, 30)).set_duration(scene_duration)
             cclip.write_videofile(norm_video_path, fps=24, codec="libx264", audio=False, preset="ultrafast", ffmpeg_params=['-pix_fmt', 'yuv420p', '-vf', 'setsar=1'], logger=None)
             cclip.close()
 
-    # 🔥 STRICT MEMORY FLUSH (Prevents OOM Crashes) 🔥
     try:
         vclip.close()
         z_clip.close()
@@ -165,7 +155,7 @@ with open("aud_list.txt", "w") as f:
 subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', 'vid_list.txt', '-c', 'copy', 'merged_video.mp4'], check=True)
 subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', 'aud_list.txt', '-c', 'copy', 'merged_audio.wav'], check=True)
 
-# --- 4. Final Master Mix (Grain + Grade + Ducking + LUFS Normalization) ---
+# --- 4. Final Master Mix (Grain + Grade + Ducking + LUFS Normalization + Bottom-Right Text) ---
 has_logo = os.path.exists("logo.png")
 has_bgm = os.path.exists("bgm.mp3")
 
@@ -186,8 +176,8 @@ else:
 
 channel_name = "Business Case Studies"
 
-# Cinematic Grain (noise) + Watermark + Grade
-filter_complex += f"[0:v]eq=contrast=1.05:saturation=1.15,vignette,noise=alls=1:allf=t+u,drawtext=text='{channel_name}':fontcolor=white@0.6:fontsize=45:x=50:y=50[v_graded]; "
+# 🔥 FIX: Positioned text to Bottom-Right (x=W-tw-50, y=H-th-50)
+filter_complex += f"[0:v]eq=contrast=1.05:saturation=1.15,vignette,noise=alls=1:allf=t+u,drawtext=text='{channel_name}':fontcolor=white@0.5:fontsize=45:x=W-tw-50:y=H-th-50[v_graded]; "
 current_v_map = "[v_graded]"
 
 if has_logo:
