@@ -1,4 +1,6 @@
 import os, requests, json, subprocess, gc, random
+import moviepy.editor as mpe
+from moviepy.editor import VideoFileClip, AudioFileClip, ColorClip, CompositeVideoClip
 
 # --- Configuration ---
 chat_id = os.environ.get('CHAT_ID')
@@ -52,7 +54,6 @@ for i, scene in enumerate(scenes_data):
     subprocess.run(['edge-tts', '--voice', 'hi-IN-MadhurNeural', '--text', text_line, '--write-media', raw_audio_path])
 
     if os.path.exists(raw_audio_path):
-        # 🔥 ELITE HACK 1: Podcast Studio EQ (Deep Bass, Clear Treble) 🔥
         subprocess.run(['ffmpeg', '-y', '-i', raw_audio_path, '-ss', '0.1', '-af', 'bass=g=5:f=110,treble=g=3:f=8000', '-ar', '44100', '-ac', '2', norm_audio_path], check=True)
         out = subprocess.check_output(['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', norm_audio_path])
         scene_duration = float(out.decode('utf-8').strip())
@@ -76,42 +77,57 @@ for i, scene in enumerate(scenes_data):
 
     # --- 2. Smart Pexels Fetching ---
     video_url = get_pexels_video(keyword)
-    if not video_url: video_url = get_pexels_video('office business')
+    if not video_url: video_url = get_pexels_video('office team')
 
-    # --- 3. Dynamic Video Normalization (Anti-Demonetization Film Grain) ---
+    # --- 3. Dynamic Video Normalization (FIXED FREEZE ISSUE) ---
     norm_video_path = f"video_{i}.mp4"
     try:
         raw_vid_path = f"raw_vid_{i}.mp4"
         req = requests.get(video_url, timeout=45)
         with open(raw_vid_path, "wb") as f: f.write(req.content)
 
-        motion_type = random.choice(['zoom_in', 'zoom_out', 'pan_left', 'pan_right'])
+        vclip = VideoFileClip(raw_vid_path)
+        
+        # Loop video smoothly if it's shorter than audio
+        if vclip.duration < scene_duration:
+            import moviepy.video.fx.all as vfx
+            vclip = vclip.fx(vfx.loop, duration=scene_duration)
+        else:
+            vclip = vclip.subclip(0, scene_duration)
+
+        # Smart Auto-Scaling
+        if (vclip.w / vclip.h) > (TARGET_W / TARGET_H):
+            vclip = vclip.resize(height=TARGET_H)
+        else:
+            vclip = vclip.resize(width=TARGET_W)
+            
+        vclip = vclip.crop(x_center=vclip.w/2, y_center=vclip.h/2, width=TARGET_W, height=TARGET_H)
+        
+        # 🔥 Smooth Video Motion (No Freezing!) 🔥
+        motion_type = random.choice(['zoom_in', 'zoom_out'])
+        zoom_factor = 1.05 
         
         if motion_type == 'zoom_in':
-            zoom_filter = f"zoompan=z='min(zoom+0.0015,1.06)':d={int(scene_duration*24)}:s=1920x1080:fps=24"
-        elif motion_type == 'zoom_out':
-            zoom_filter = f"zoompan=z='max(1.06-(in/24)*0.0015,1)':d={int(scene_duration*24)}:s=1920x1080:fps=24"
-        elif motion_type == 'pan_left':
-            zoom_filter = f"zoompan=z=1.06:x='max(0, x-1)':y='y':d={int(scene_duration*24)}:s=1920x1080:fps=24"
+            z_clip = vclip.resize(lambda t: 1.0 + (zoom_factor - 1.0) * (t / scene_duration)).set_position(('center', 'center'))
         else:
-            zoom_filter = f"zoompan=z=1.06:x='min(iw-iw/zoom, x+1)':y='y':d={int(scene_duration*24)}:s=1920x1080:fps=24"
+            z_clip = vclip.resize(lambda t: zoom_factor - (zoom_factor - 1.0) * (t / scene_duration)).set_position(('center', 'center'))
 
-        # 🔥 ELITE HACK 2: noise=alls=2:allf=t+u (Dynamic Film Grain to fool Content ID) 🔥
-        vf_chain = f"scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,{zoom_filter},noise=alls=2:allf=t+u,setsar=1"
+        final_scene = CompositeVideoClip([z_clip], size=(TARGET_W, TARGET_H)).set_duration(scene_duration)
 
-        subprocess.run([
-            'ffmpeg', '-y', '-stream_loop', '-1', '-i', raw_vid_path,
-            '-vf', vf_chain,
-            '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-pix_fmt', 'yuv420p',
-            '-video_track_timescale', '90000', '-t', str(scene_duration), '-an', norm_video_path
-        ], check=True)
-        
+        # Force identical output streams to avoid black screens
+        final_scene.write_videofile(norm_video_path, fps=24, codec="libx264", audio=False, preset="ultrafast", ffmpeg_params=['-pix_fmt', 'yuv420p', '-vf', 'setsar=1'], logger=None)
+
+        vclip.close()
+        final_scene.close()
         if os.path.exists(raw_vid_path): os.remove(raw_vid_path)
     except Exception as e:
         print(f"Error on scene {i}: {e}")
-        subprocess.run(['ffmpeg', '-y', '-f', 'lavfi', '-i', 'color=c=0x1a1a1a:s=1920x1080:r=24', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-video_track_timescale', '90000', '-t', str(scene_duration), norm_video_path], check=True)
+        cclip = ColorClip(size=(TARGET_W, TARGET_H), color=(20, 20, 20)).set_duration(scene_duration)
+        cclip.write_videofile(norm_video_path, fps=24, codec="libx264", audio=False, preset="ultrafast", ffmpeg_params=['-pix_fmt', 'yuv420p', '-vf', 'setsar=1'], logger=None)
+        cclip.close()
 
     video_files.append(norm_video_path)
+    gc.collect()
     print(f"Scene {i+1} Processed")
 
 # --- Save SRT File ---
@@ -128,7 +144,7 @@ with open("aud_list.txt", "w") as f:
 subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', 'vid_list.txt', '-c', 'copy', 'merged_video.mp4'], check=True)
 subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', 'aud_list.txt', '-c', 'copy', 'merged_audio.wav'], check=True)
 
-# --- 5. Final Master Mix (Grade + Ducking + Watermark + YouTube Optimization) ---
+# --- 5. Final Master Mix (Grade + Text Watermark + Ducking) ---
 has_logo = os.path.exists("logo.png")
 has_bgm = os.path.exists("bgm.mp3")
 
@@ -146,8 +162,9 @@ if has_bgm:
 else:
     audio_map = "1:a"
 
-# Cinematic Grade
-filter_complex += "[0:v]eq=contrast=1.05:saturation=1.15,vignette[v_graded]; "
+# 🔥 CHANNEL NAME TEXT + Cinematic Grade 🔥
+channel_name = "Business Case Studies"
+filter_complex += f"[0:v]eq=contrast=1.05:saturation=1.15,vignette,drawtext=text='{channel_name}':fontcolor=white@0.7:fontsize=50:x=50:y=50[v_graded]; "
 current_v_map = "[v_graded]"
 
 if has_logo:
@@ -160,7 +177,6 @@ else:
 if filter_complex.endswith("; "): filter_complex = filter_complex[:-2]
 if filter_complex: ffmpeg_cmd.extend(['-filter_complex', filter_complex])
 
-# 🔥 ELITE HACK 3: YouTube Encoding Standard (Fast Upload, 4K Quality Look) 🔥
 ffmpeg_cmd.extend([
     '-map', video_map, '-map', audio_map,
     '-c:v', 'libx264', '-preset', 'fast', '-profile:v', 'high', '-bf', '2', '-g', '48', '-crf', '26', '-pix_fmt', 'yuv420p',
