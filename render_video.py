@@ -22,12 +22,6 @@ last_successful_media = None
 
 print(f"Total Scenes to render: {len(scenes_data)}")
 
-def upload_file(file_path):
-    try:
-        res = requests.post("https://tmpfiles.org/api/v1/upload", files={'file': open(file_path, 'rb')}, timeout=1200)
-        return res.json()['data']['url'].replace('tmpfiles.org/', 'tmpfiles.org/dl/')
-    except: return "Failed"
-
 def get_pexels_video(query):
     try:
         res = requests.get(f"https://api.pexels.com/videos/search?query={query}&per_page=15&orientation=landscape", headers={"Authorization": pexels_key}, timeout=15).json()
@@ -197,12 +191,28 @@ ffmpeg_cmd.extend([
 ])
 subprocess.run(ffmpeg_cmd, check=True)
 
-# --- 5. Final Upload ---
+# --- 5. Final Upload (Updated with Litterbox/Catbox API) ---
 def upload_file(file_path):
     try:
-        res = requests.post("https://tmpfiles.org/api/v1/upload", files={'file': open(file_path, 'rb')}, timeout=1200)
-        return res.json()['data']['url'].replace('tmpfiles.org/', 'tmpfiles.org/dl/')
-    except: return "Failed"
+        print("Uploading to Litterbox (Catbox) API...")
+        data = {
+            'reqtype': 'fileupload',
+            'time': '1h'
+        }
+        files = {
+            'fileToUpload': open(file_path, 'rb')
+        }
+        res = requests.post("https://litterbox.catbox.moe/api", data=data, files=files, timeout=1200)
+        
+        if res.status_code == 200:
+            print(f"Upload successful: {res.text.strip()}")
+            return res.text.strip()
+        else:
+            print(f"Upload failed with status {res.status_code}")
+            return "Failed"
+    except Exception as e:
+        print(f"Upload error: {e}")
+        return "Failed"
 
 video_link = upload_file('final_video.mp4')
 final_msg = f"READY_TO_UPLOAD|{video_link}|{video_title}|{thumbnail_prompt}|{video_desc}"
