@@ -35,110 +35,61 @@ def get_pexels_video(query):
     except:
         return None
 
-# --- Main Video Processing Loop ---
+# --- 1. Processing Loop ---
 for i, scene in enumerate(scenes_data):
     keyword = scene.get('keyword', 'business').strip()
     image_prompt = scene.get('image_prompt', keyword).strip()
     text_line = scene.get('text', ' ').strip() or " "
 
-    # --- 1. Audio Pipeline ---
+    # Audio Pipeline
     raw_audio_path = f"raw_audio_{i}.mp3"
     norm_audio_path = f"audio_{i}.wav"
     subprocess.run(['edge-tts', '--voice', 'hi-IN-MadhurNeural', '--text', text_line, '--write-media', raw_audio_path])
-
     if os.path.exists(raw_audio_path):
-        audio_filter = "silenceremove=stop_periods=-1:stop_duration=0.3:stop_threshold=-35dB,bass=g=5:f=110,treble=g=3:f=8000"
-        subprocess.run(['ffmpeg', '-y', '-i', raw_audio_path, '-af', audio_filter, '-ar', '44100', '-ac', '2', norm_audio_path], check=True)
+        subprocess.run(['ffmpeg', '-y', '-i', raw_audio_path, '-af', 'silenceremove=stop_periods=-1:stop_duration=0.3:stop_threshold=-35dB,bass=g=5:f=110,treble=g=3:f=8000', '-ar', '44100', '-ac', '2', norm_audio_path], check=True)
         out = subprocess.check_output(['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', norm_audio_path])
         scene_duration = float(out.decode('utf-8').strip()) + 0.2 
     else:
         scene_duration = 3.0
         subprocess.run(['ffmpeg', '-y', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo', '-t', str(scene_duration), norm_audio_path], check=True)
+    audio_files.append(norm_audio_path)
 
-    final_audio_path = norm_audio_path
-    if os.path.exists("whoosh.mp3") and i > 0:
-        mixed_audio = f"mixed_audio_{i}.wav"
-        subprocess.run(['ffmpeg', '-y', '-i', norm_audio_path, '-i', 'whoosh.mp3', '-filter_complex', '[0:a][1:a]amix=inputs=2:duration=first:dropout_transition=0[aout]', '-map', '[aout]', '-ar', '44100', '-ac', '2', mixed_audio], check=True)
-        final_audio_path = mixed_audio
-
-    audio_files.append(final_audio_path)
-
-    # --- 2. Smart Visual Fetching ---
+    # Visual Pipeline
     video_url = get_pexels_video(keyword)
     norm_video_path = f"video_{i}.mp4"
-    raw_media_path = f"raw_media_{i}.mp4"
-    
     try:
         if video_url:
             req = requests.get(video_url, timeout=45)
-            with open(raw_media_path, "wb") as f: f.write(req.content)
-            vclip = VideoFileClip(raw_media_path)
-            
-            vclip = vclip.fx(vfx.speedx, 1.2)
-            if vclip.duration < scene_duration:
-                vclip = vclip.fx(vfx.loop, duration=scene_duration)
-            else:
-                vclip = vclip.subclip(0, scene_duration)
-            last_successful_media = {"type": "video", "path": raw_media_path}
-
+            with open(f"raw_{i}.mp4", "wb") as f: f.write(req.content)
+            vclip = VideoFileClip(f"raw_{i}.mp4").fx(vfx.speedx, 1.2).subclip(0, min(VideoFileClip(f"raw_{i}.mp4").duration, scene_duration))
         else:
-            raw_media_path = f"raw_media_{i}.jpg"
-            ai_prompt_encoded = urllib.parse.quote(f"Epic cinematic concept art, {image_prompt}, highly detailed, 8k resolution, Unreal Engine 5 render, dramatic contrast, pure textless photograph, no typography")
-            img_url = f"https://image.pollinations.ai/prompt/{ai_prompt_encoded}?width=1920&height=1080&nologo=true"
+            raw_media_path = f"raw_{i}.jpg"
+            img_url = f"https://image.pollinations.ai/prompt/{urllib.parse.quote(image_prompt)}?width=1920&height=1080&nologo=true"
             req = requests.get(img_url, timeout=45)
             with open(raw_media_path, "wb") as f: f.write(req.content)
             vclip = ImageClip(raw_media_path).set_duration(scene_duration)
-            last_successful_media = {"type": "image", "path": raw_media_path}
-
-        if (vclip.w / vclip.h) > (TARGET_W / TARGET_H):
-            vclip = vclip.resize(height=TARGET_H)
-        else:
-            vclip = vclip.resize(width=TARGET_W)
-        vclip = vclip.crop(x_center=vclip.w/2, y_center=vclip.h/2, width=TARGET_W, height=TARGET_H)
         
-        motion_type = random.choice(['zoom_in', 'zoom_out'])
-        zoom_factor = 1.05 
-        if motion_type == 'zoom_in':
-            z_clip = vclip.resize(lambda t: 1.0 + (zoom_factor - 1.0) * (t / scene_duration)).set_position(('center', 'center'))
-        else:
-            z_clip = vclip.resize(lambda t: zoom_factor - (zoom_factor - 1.0) * (t / scene_duration)).set_position(('center', 'center'))
-
-        final_scene = CompositeVideoClip([z_clip], size=(TARGET_W, TARGET_H)).set_duration(scene_duration)
-        final_scene.write_videofile(norm_video_path, fps=24, codec="libx264", audio=False, preset="ultrafast", ffmpeg_params=['-pix_fmt', 'yuv420p', '-vf', 'setsar=1'], logger=None)
-    except Exception as e:
-        if last_successful_media and os.path.exists(last_successful_media["path"]):
-            cclip = ColorClip(size=(TARGET_W, TARGET_H), color=(30, 30, 30)).set_duration(scene_duration)
-            cclip.write_videofile(norm_video_path, fps=24, codec="libx264", audio=False, preset="ultrafast", ffmpeg_params=['-pix_fmt', 'yuv420p', '-vf', 'setsar=1'], logger=None)
-            cclip.close()
+        vclip = vclip.resize(height=TARGET_H).crop(x_center=vclip.w/2, y_center=vclip.h/2, width=TARGET_W, height=TARGET_H)
+        final_scene = CompositeVideoClip([vclip.resize(1.05)], size=(TARGET_W, TARGET_H)).set_duration(scene_duration)
+        final_scene.write_videofile(norm_video_path, fps=24, codec="libx264", audio=False, preset="ultrafast", logger=None)
+    except:
+        ColorClip(size=(TARGET_W, TARGET_H), color=(30, 30, 30)).set_duration(scene_duration).write_videofile(norm_video_path, fps=24, codec="libx264", audio=False, preset="ultrafast", logger=None)
     
     video_files.append(norm_video_path)
     gc.collect()
 
-# --- 3. High-Speed FFmpeg Concat ---
-with open("vid_list.txt", "w") as f:
-    for vid in video_files: f.write(f"file '{vid}'\n")
-with open("aud_list.txt", "w") as f:
-    for aud in audio_files: f.write(f"file '{aud}'\n")
-
+# --- 2. Final Render ---
+with open("vid_list.txt", "w") as f: [f.write(f"file '{v}'\n") for v in video_files]
+with open("aud_list.txt", "w") as f: [f.write(f"file '{a}'\n") for a in audio_files]
 subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', 'vid_list.txt', '-c', 'copy', 'merged_video.mp4'], check=True)
 subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', 'aud_list.txt', '-c', 'copy', 'merged_audio.wav'], check=True)
+subprocess.run(['ffmpeg', '-y', '-i', 'merged_video.mp4', '-i', 'merged_audio.wav', '-filter_complex', '[1:a]loudnorm=I=-14[a_out]', '-map', '0:v', '-map', '[a_out]', '-c:v', 'libx264', '-preset', 'fast', '-crf', '26', '-c:a', 'aac', 'final_video.mp4'], check=True)
 
-# --- 4. Final Master Mix ---
-ffmpeg_cmd = ['ffmpeg', '-y', '-i', 'merged_video.mp4', '-i', 'merged_audio.wav']
-if os.path.exists("bgm.mp3"):
-    ffmpeg_cmd.extend(['-stream_loop', '-1', '-i', 'bgm.mp3'])
-    ffmpeg_cmd.extend(['-filter_complex', '[1:a]asplit=2[voice_main][voice_control];[2:a]volume=0.25[bgm_low];[bgm_low][voice_control]sidechaincompress=threshold=0.08:ratio=8[ducked_bgm];[voice_main][ducked_bgm]amix=inputs=2:duration=first,loudnorm=I=-14[a_out]'])
-else:
-    ffmpeg_cmd.extend(['-filter_complex', '[1:a]loudnorm=I=-14[a_out]'])
-
-ffmpeg_cmd.extend(['-map', '0:v', '-map', '[a_out]', '-c:v', 'libx264', '-preset', 'fast', '-crf', '26', '-c:a', 'aac', 'final_video.mp4'])
-subprocess.run(ffmpeg_cmd, check=True)
-
-# --- 5. Final Upload (Guaranteed HTTP Mode) ---
+# --- 3. Final Upload (Guaranteed HTTP Mode) ---
 def upload_file(file_path):
     print("Uploading via native cURL (HTTP Mode)...")
     try:
-        # HTTP ka use karke SSL handshake error puri tarah bypass kar diya hai
+        # HTTP ka use karke SSL handshake error bypass kar diya hai
         command = ['curl', '-s', '-F', f'file=@{file_path}', 'http://0x0.st']
         result = subprocess.check_output(command, timeout=1200).decode('utf-8').strip()
         if "http" in result:
@@ -149,5 +100,4 @@ def upload_file(file_path):
     return "Failed"
 
 video_link = upload_file('final_video.mp4')
-final_msg = f"READY_TO_UPLOAD|{video_link}|{video_title}|{thumbnail_prompt}|{video_desc}"
-requests.post(f"https://api.telegram.org/bot{bot_token}/sendMessage", json={"chat_id": chat_id, "text": final_msg}, verify=False)
+requests.post(f"https://api.telegram.org/bot{bot_token}/sendMessage", json={"chat_id": chat_id, "text": f"READY_TO_UPLOAD|{video_link}|{video_title}|{thumbnail_prompt}|{video_desc}"}, verify=False)
