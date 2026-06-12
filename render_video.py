@@ -186,29 +186,25 @@ ffmpeg_cmd.extend([
 ])
 subprocess.run(ffmpeg_cmd, check=True)
 
-# --- 5. Final Upload (Multi-Attempt Failover Engine) ---
+# --- 5. Final Upload (Ultimate Failover with SSL Fix) ---
 def upload_file(file_path):
-    # Attempt 1: File.io (Official SaaS API, 100MB limit)
+    # Attempt 1: 0x0.st (Super reliable for CI/CD, 512MB limit)
     try:
-        print("Attempt 1: Uploading to File.io API...")
-        res = requests.post("https://file.io/", files={"file": open(file_path, 'rb')}, timeout=1200)
-        
-        if res.status_code == 200 and res.json().get("success"):
-            link = res.json()["link"]
-            print(f"File.io success: {link}")
+        print("Attempt 1: Uploading to 0x0.st via cURL...")
+        # -k skips SSL checks, -F is for form data
+        out = subprocess.check_output(['curl', '-s', '-k', '-F', f'file=@{file_path}', 'https://0x0.st'], timeout=1200).decode('utf-8')
+        if "http" in out:
+            link = out.strip()
+            print(f"0x0.st success: {link}")
             return link
-        else:
-            print(f"File.io failed or rejected. Status: {res.status_code}")
     except Exception as e:
-        print(f"File.io exception: {e}")
+        print(f"0x0.st exception: {e}")
 
-    # Attempt 2: Bashupload (Direct cURL Method, No strict IP block, 50GB limit)
+    # Attempt 2: Bashupload (With SSL Bypass Fix)
     try:
-        print("Attempt 2: Uploading via native cURL to Bashupload...")
-        # curl command hamesha basic bot-protections ko easily bypass kar deta hai
-        out = subprocess.check_output(['curl', '-s', '-T', file_path, 'https://bashupload.com'], timeout=1200).decode('utf-8')
-        
-        # Output se link nikalna
+        print("Attempt 2: Uploading via native cURL to Bashupload with SSL bypass...")
+        # Added '-k' to fix Exit Status 60 (SSL Error)
+        out = subprocess.check_output(['curl', '-s', '-k', '-T', file_path, 'https://bashupload.com'], timeout=1200).decode('utf-8')
         match = re.search(r'(https://bashupload\.com/\S+)', out)
         if match:
             link = match.group(1)
@@ -216,9 +212,21 @@ def upload_file(file_path):
             return link
     except Exception as e:
         print(f"Bashupload exception: {e}")
+
+    # Attempt 3: File.io (With SSL Bypass Fix)
+    try:
+        print("Attempt 3: Uploading to File.io API...")
+        # Added verify=False to bypass SSL errors here too
+        res = requests.post("https://file.io/", files={"file": open(file_path, 'rb')}, timeout=1200, verify=False)
+        if res.status_code == 200 and res.json().get("success"):
+            link = res.json()["link"]
+            print(f"File.io success: {link}")
+            return link
+    except Exception as e:
+        print(f"File.io exception: {e}")
         
     return "Failed"
 
 video_link = upload_file('final_video.mp4')
 final_msg = f"READY_TO_UPLOAD|{video_link}|{video_title}|{thumbnail_prompt}|{video_desc}"
-requests.post(f"https://api.telegram.org/bot{bot_token}/sendMessage", json={"chat_id": chat_id, "text": final_msg})
+requests.post(f"https://api.telegram.org/bot{bot_token}/sendMessage", json={"chat_id": chat_id, "text": final_msg}, verify=False)
