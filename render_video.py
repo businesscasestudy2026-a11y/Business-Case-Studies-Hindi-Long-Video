@@ -82,11 +82,9 @@ for i, scene in enumerate(scenes_data):
             last_successful_media = {"type": "video", "path": raw_media_path}
 
         else:
-            print(f"⚠️ Precise Match: Generating AI Image for '{image_prompt}'")
             raw_media_path = f"raw_media_{i}.jpg"
             ai_prompt_encoded = urllib.parse.quote(f"Epic cinematic concept art, {image_prompt}, highly detailed, 8k resolution, Unreal Engine 5 render, dramatic contrast, pure textless photograph, no typography")
             img_url = f"https://image.pollinations.ai/prompt/{ai_prompt_encoded}?width=1920&height=1080&nologo=true"
-            
             req = requests.get(img_url, timeout=45)
             with open(raw_media_path, "wb") as f: f.write(req.content)
             vclip = ImageClip(raw_media_path).set_duration(scene_duration)
@@ -96,7 +94,6 @@ for i, scene in enumerate(scenes_data):
             vclip = vclip.resize(height=TARGET_H)
         else:
             vclip = vclip.resize(width=TARGET_W)
-            
         vclip = vclip.crop(x_center=vclip.w/2, y_center=vclip.h/2, width=TARGET_W, height=TARGET_H)
         
         motion_type = random.choice(['zoom_in', 'zoom_out'])
@@ -108,29 +105,11 @@ for i, scene in enumerate(scenes_data):
 
         final_scene = CompositeVideoClip([z_clip], size=(TARGET_W, TARGET_H)).set_duration(scene_duration)
         final_scene.write_videofile(norm_video_path, fps=24, codec="libx264", audio=False, preset="ultrafast", ffmpeg_params=['-pix_fmt', 'yuv420p', '-vf', 'setsar=1'], logger=None)
-
     except Exception as e:
         if last_successful_media and os.path.exists(last_successful_media["path"]):
-            if last_successful_media["type"] == "video":
-                fallback_clip = VideoFileClip(last_successful_media["path"]).fx(vfx.loop, duration=scene_duration)
-            else:
-                fallback_clip = ImageClip(last_successful_media["path"]).set_duration(scene_duration)
-            
-            fallback_clip = fallback_clip.resize(height=TARGET_H).crop(x_center=fallback_clip.w/2, y_center=fallback_clip.h/2, width=TARGET_W, height=TARGET_H)
-            z_clip = fallback_clip.resize(lambda t: 1.05 - (0.05) * (t / scene_duration)).set_position(('center', 'center'))
-            final_scene = CompositeVideoClip([z_clip], size=(TARGET_W, TARGET_H)).set_duration(scene_duration)
-            final_scene.write_videofile(norm_video_path, fps=24, codec="libx264", audio=False, preset="ultrafast", ffmpeg_params=['-pix_fmt', 'yuv420p', '-vf', 'setsar=1'], logger=None)
-            fallback_clip.close()
-        else:
             cclip = ColorClip(size=(TARGET_W, TARGET_H), color=(30, 30, 30)).set_duration(scene_duration)
             cclip.write_videofile(norm_video_path, fps=24, codec="libx264", audio=False, preset="ultrafast", ffmpeg_params=['-pix_fmt', 'yuv420p', '-vf', 'setsar=1'], logger=None)
             cclip.close()
-
-    try:
-        vclip.close()
-        z_clip.close()
-        final_scene.close()
-    except: pass
     
     video_files.append(norm_video_path)
     gc.collect()
@@ -138,7 +117,6 @@ for i, scene in enumerate(scenes_data):
 # --- 3. High-Speed FFmpeg Concat ---
 with open("vid_list.txt", "w") as f:
     for vid in video_files: f.write(f"file '{vid}'\n")
-
 with open("aud_list.txt", "w") as f:
     for aud in audio_files: f.write(f"file '{aud}'\n")
 
@@ -146,85 +124,27 @@ subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', 'vid_list.tx
 subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', 'aud_list.txt', '-c', 'copy', 'merged_audio.wav'], check=True)
 
 # --- 4. Final Master Mix ---
-has_logo = os.path.exists("logo.png")
-has_bgm = os.path.exists("bgm.mp3")
-
 ffmpeg_cmd = ['ffmpeg', '-y', '-i', 'merged_video.mp4', '-i', 'merged_audio.wav']
-filter_complex = ""
-audio_map = ""
-video_map = ""
-inputs = 2
-
-if has_bgm:
+if os.path.exists("bgm.mp3"):
     ffmpeg_cmd.extend(['-stream_loop', '-1', '-i', 'bgm.mp3'])
-    filter_complex += "[1:a]asplit=2[voice_main][voice_control]; [2:a]volume=0.25[bgm_low]; [bgm_low][voice_control]sidechaincompress=threshold=0.08:ratio=8:attack=200:release=1000[ducked_bgm]; [voice_main][ducked_bgm]amix=inputs=2:duration=first,loudnorm=I=-14:LRA=11:TP=-1.5[a_out]; "
-    audio_map = "[a_out]"
-    inputs += 1
+    ffmpeg_cmd.extend(['-filter_complex', '[1:a]asplit=2[voice_main][voice_control];[2:a]volume=0.25[bgm_low];[bgm_low][voice_control]sidechaincompress=threshold=0.08:ratio=8[ducked_bgm];[voice_main][ducked_bgm]amix=inputs=2:duration=first,loudnorm=I=-14[a_out]'])
 else:
-    filter_complex += "[1:a]loudnorm=I=-14:LRA=11:TP=-1.5[a_out]; "
-    audio_map = "[a_out]"
+    ffmpeg_cmd.extend(['-filter_complex', '[1:a]loudnorm=I=-14[a_out]'])
 
-channel_name = "Business Case Studies"
-
-filter_complex += f"[0:v]eq=contrast=1.05:saturation=1.15,vignette,noise=alls=1:allf=t+u,drawtext=text='{channel_name}':fontcolor=white@0.5:fontsize=45:x=W-tw-50:y=H-th-50[v_graded]; "
-current_v_map = "[v_graded]"
-
-if has_logo:
-    ffmpeg_cmd.extend(['-i', 'logo.png'])
-    filter_complex += f"[{inputs-1}:v]format=rgba,colorchannelmixer=aa=0.85,scale=200:-1[logo]; {current_v_map}[logo]overlay=W-w-40:40[v_out]"
-    video_map = "[v_out]"
-else:
-    video_map = current_v_map
-
-if filter_complex.endswith("; "): filter_complex = filter_complex[:-2]
-if filter_complex: ffmpeg_cmd.extend(['-filter_complex', filter_complex])
-
-ffmpeg_cmd.extend([
-    '-map', video_map, '-map', audio_map,
-    '-c:v', 'libx264', '-preset', 'fast', '-profile:v', 'high', '-bf', '2', '-g', '48', '-crf', '26', '-pix_fmt', 'yuv420p',
-    '-c:a', 'aac', '-b:a', '128k', '-shortest', 'final_video.mp4'
-])
+ffmpeg_cmd.extend(['-map', '0:v', '-map', '[a_out]', '-c:v', 'libx264', '-preset', 'fast', '-crf', '26', '-c:a', 'aac', 'final_video.mp4'])
 subprocess.run(ffmpeg_cmd, check=True)
 
-# --- 5. Final Upload (Ultimate Failover with SSL Fix) ---
+# --- 5. Final Upload (SSL Bypass Enabled) ---
 def upload_file(file_path):
-    # Attempt 1: 0x0.st (Super reliable for CI/CD, 512MB limit)
+    print("Uploading via requests (SSL Bypass)...")
     try:
-        print("Attempt 1: Uploading to 0x0.st via cURL...")
-        # -k skips SSL checks, -F is for form data
-        out = subprocess.check_output(['curl', '-s', '-k', '-F', f'file=@{file_path}', 'https://0x0.st'], timeout=1200).decode('utf-8')
-        if "http" in out:
-            link = out.strip()
-            print(f"0x0.st success: {link}")
-            return link
+        # 0x0.st primary option
+        with open(file_path, 'rb') as f:
+            res = requests.post("https://0x0.st", files={"file": f}, timeout=1200, verify=False)
+        if res.status_code == 200:
+            return res.text.strip()
     except Exception as e:
-        print(f"0x0.st exception: {e}")
-
-    # Attempt 2: Bashupload (With SSL Bypass Fix)
-    try:
-        print("Attempt 2: Uploading via native cURL to Bashupload with SSL bypass...")
-        # Added '-k' to fix Exit Status 60 (SSL Error)
-        out = subprocess.check_output(['curl', '-s', '-k', '-T', file_path, 'https://bashupload.com'], timeout=1200).decode('utf-8')
-        match = re.search(r'(https://bashupload\.com/\S+)', out)
-        if match:
-            link = match.group(1)
-            print(f"Bashupload success: {link}")
-            return link
-    except Exception as e:
-        print(f"Bashupload exception: {e}")
-
-    # Attempt 3: File.io (With SSL Bypass Fix)
-    try:
-        print("Attempt 3: Uploading to File.io API...")
-        # Added verify=False to bypass SSL errors here too
-        res = requests.post("https://file.io/", files={"file": open(file_path, 'rb')}, timeout=1200, verify=False)
-        if res.status_code == 200 and res.json().get("success"):
-            link = res.json()["link"]
-            print(f"File.io success: {link}")
-            return link
-    except Exception as e:
-        print(f"File.io exception: {e}")
-        
+        print(f"Primary upload failed: {e}")
     return "Failed"
 
 video_link = upload_file('final_video.mp4')
