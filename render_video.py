@@ -1,4 +1,4 @@
-import os, requests, json, subprocess, gc, random
+import os, requests, json, subprocess, gc, random, re
 import urllib.parse
 import moviepy.editor as mpe
 from moviepy.editor import VideoFileClip, AudioFileClip, ColorClip, CompositeVideoClip, ImageClip
@@ -186,26 +186,38 @@ ffmpeg_cmd.extend([
 ])
 subprocess.run(ffmpeg_cmd, check=True)
 
-# --- 5. Final Upload (Guaranteed via Transfer.sh API) ---
+# --- 5. Final Upload (Multi-Attempt Failover Engine) ---
 def upload_file(file_path):
+    # Attempt 1: File.io (Official SaaS API, 100MB limit)
     try:
-        print("Uploading to Transfer.sh API...")
-        file_name = os.path.basename(file_path)
-        with open(file_path, 'rb') as f:
-            res = requests.put(f"https://transfer.sh/{file_name}", data=f, timeout=1200)
+        print("Attempt 1: Uploading to File.io API...")
+        res = requests.post("https://file.io/", files={"file": open(file_path, 'rb')}, timeout=1200)
         
-        if res.status_code == 200:
-            link = res.text.strip()
-            # n8n download node ke liye /get/ format set karna zaroori hai
-            direct_link = link.replace("https://transfer.sh/", "https://transfer.sh/get/")
-            print(f"Upload successful: {direct_link}")
-            return direct_link
+        if res.status_code == 200 and res.json().get("success"):
+            link = res.json()["link"]
+            print(f"File.io success: {link}")
+            return link
         else:
-            print(f"Upload failed with status {res.status_code}")
-            return "Failed"
+            print(f"File.io failed or rejected. Status: {res.status_code}")
     except Exception as e:
-        print(f"Upload error: {e}")
-        return "Failed"
+        print(f"File.io exception: {e}")
+
+    # Attempt 2: Bashupload (Direct cURL Method, No strict IP block, 50GB limit)
+    try:
+        print("Attempt 2: Uploading via native cURL to Bashupload...")
+        # curl command hamesha basic bot-protections ko easily bypass kar deta hai
+        out = subprocess.check_output(['curl', '-s', '-T', file_path, 'https://bashupload.com'], timeout=1200).decode('utf-8')
+        
+        # Output se link nikalna
+        match = re.search(r'(https://bashupload\.com/\S+)', out)
+        if match:
+            link = match.group(1)
+            print(f"Bashupload success: {link}")
+            return link
+    except Exception as e:
+        print(f"Bashupload exception: {e}")
+        
+    return "Failed"
 
 video_link = upload_file('final_video.mp4')
 final_msg = f"READY_TO_UPLOAD|{video_link}|{video_title}|{thumbnail_prompt}|{video_desc}"
