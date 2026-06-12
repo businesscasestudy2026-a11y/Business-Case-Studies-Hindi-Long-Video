@@ -138,7 +138,6 @@ subprocess.run(ffmpeg_cmd, check=True)
 def upload_file(file_path):
     print("Uploading via requests (SSL Bypass)...")
     try:
-        # 0x0.st primary option
         with open(file_path, 'rb') as f:
             res = requests.post("https://0x0.st", files={"file": f}, timeout=1200, verify=False)
         if res.status_code == 200:
