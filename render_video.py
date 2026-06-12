@@ -46,21 +46,23 @@ subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', 'v.txt', '-c
 subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', 'a.txt', '-c', 'copy', 'm_a.wav'], check=True)
 subprocess.run(['ffmpeg', '-y', '-i', 'm_v.mp4', '-i', 'm_a.wav', '-filter_complex', '[1:a]loudnorm=I=-14[a_out]', '-map', '0:v', '-map', '[a_out]', '-c:v', 'libx264', '-crf', '26', '-c:a', 'aac', 'final.mp4'], check=True)
 
-# --- 3. Final Upload ---
+# --- 3. Final Upload (Fixed Scope) ---
 def upload_file(file_path):
-    # Variables wapas fetch kar rahe hain scope error hatane ke liye
+    # Variables yahan fetch ho rahe hain taaki NameError na ho
     title = os.environ.get('TITLE', 'Business Case Study')
     desc = os.environ.get('DESCRIPTION', '')
     thumb = os.environ.get('THUMBNAIL_PROMPT', '')
     
+    print("Uploading...")
     try:
+        # 0x0.st primary option
         res = subprocess.check_output(['curl', '-s', '-F', f'file=@{file_path}', 'http://0x0.st'], timeout=1200).decode('utf-8').strip()
         if res.startswith('http'):
-            link = res
-            msg = f"READY_TO_UPLOAD|{link}|{title}|{thumb}|{desc}"
+            msg = f"READY_TO_UPLOAD|{res}|{title}|{thumb}|{desc}"
             requests.post(f"https://api.telegram.org/bot{bot_token}/sendMessage", json={"chat_id": chat_id, "text": msg}, verify=False)
             return True
-    except: pass
-    return False
+    except Exception as e:
+        print(f"Error: {e}")
+        return False
 
 upload_file('final.mp4')
