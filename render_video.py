@@ -38,7 +38,6 @@ def get_pexels_video(query):
 # --- Main Video Processing Loop ---
 for i, scene in enumerate(scenes_data):
     keyword = scene.get('keyword', 'business').strip()
-    # 🔥 Naya AI Visual Prompt Engine 🔥
     image_prompt = scene.get('image_prompt', keyword).strip()
     text_line = scene.get('text', ' ').strip() or " "
 
@@ -64,13 +63,12 @@ for i, scene in enumerate(scenes_data):
 
     audio_files.append(final_audio_path)
 
-    # --- 2. Smart Visual Fetching (Exact Match Logic) ---
+    # --- 2. Smart Visual Fetching ---
     video_url = get_pexels_video(keyword)
     norm_video_path = f"video_{i}.mp4"
     raw_media_path = f"raw_media_{i}.mp4"
     
     try:
-        # Pexels se generic keywords ke liye video mangao
         if video_url:
             req = requests.get(video_url, timeout=45)
             with open(raw_media_path, "wb") as f: f.write(req.content)
@@ -84,7 +82,6 @@ for i, scene in enumerate(scenes_data):
             last_successful_media = {"type": "video", "path": raw_media_path}
 
         else:
-            # 🔥 Agar video na mile, toh EXACT matching cinematic image banao 🔥
             print(f"⚠️ Precise Match: Generating AI Image for '{image_prompt}'")
             raw_media_path = f"raw_media_{i}.jpg"
             ai_prompt_encoded = urllib.parse.quote(f"Epic cinematic concept art, {image_prompt}, highly detailed, 8k resolution, Unreal Engine 5 render, dramatic contrast, pure textless photograph, no typography")
@@ -95,7 +92,6 @@ for i, scene in enumerate(scenes_data):
             vclip = ImageClip(raw_media_path).set_duration(scene_duration)
             last_successful_media = {"type": "image", "path": raw_media_path}
 
-        # Screen Normalization
         if (vclip.w / vclip.h) > (TARGET_W / TARGET_H):
             vclip = vclip.resize(height=TARGET_H)
         else:
@@ -103,7 +99,6 @@ for i, scene in enumerate(scenes_data):
             
         vclip = vclip.crop(x_center=vclip.w/2, y_center=vclip.h/2, width=TARGET_W, height=TARGET_H)
         
-        # Smooth Motion
         motion_type = random.choice(['zoom_in', 'zoom_out'])
         zoom_factor = 1.05 
         if motion_type == 'zoom_in':
@@ -150,7 +145,7 @@ with open("aud_list.txt", "w") as f:
 subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', 'vid_list.txt', '-c', 'copy', 'merged_video.mp4'], check=True)
 subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', 'aud_list.txt', '-c', 'copy', 'merged_audio.wav'], check=True)
 
-# --- 4. Final Master Mix (Grade + Ducking + LUFS Normalization + Bottom-Right Text) ---
+# --- 4. Final Master Mix ---
 has_logo = os.path.exists("logo.png")
 has_bgm = os.path.exists("bgm.mp3")
 
@@ -191,22 +186,21 @@ ffmpeg_cmd.extend([
 ])
 subprocess.run(ffmpeg_cmd, check=True)
 
-# --- 5. Final Upload (Updated with Litterbox/Catbox API) ---
+# --- 5. Final Upload (Guaranteed via Pixeldrain API) ---
 def upload_file(file_path):
     try:
-        print("Uploading to Litterbox (Catbox) API...")
-        data = {
-            'reqtype': 'fileupload',
-            'time': '1h'
-        }
-        files = {
-            'fileToUpload': open(file_path, 'rb')
-        }
-        res = requests.post("https://litterbox.catbox.moe/api", data=data, files=files, timeout=1200)
+        print("Uploading to Pixeldrain API...")
+        res = requests.post(
+            "https://pixeldrain.com/api/file", 
+            files={"file": open(file_path, "rb")}, 
+            timeout=1200
+        )
         
-        if res.status_code == 200:
-            print(f"Upload successful: {res.text.strip()}")
-            return res.text.strip()
+        if res.status_code in [200, 201]:
+            file_id = res.json().get("id")
+            direct_link = f"https://pixeldrain.com/api/file/{file_id}"
+            print(f"Upload successful: {direct_link}")
+            return direct_link
         else:
             print(f"Upload failed with status {res.status_code}")
             return "Failed"
