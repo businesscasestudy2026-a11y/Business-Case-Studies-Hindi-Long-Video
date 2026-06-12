@@ -186,19 +186,18 @@ ffmpeg_cmd.extend([
 ])
 subprocess.run(ffmpeg_cmd, check=True)
 
-# --- 5. Final Upload (Guaranteed via Pixeldrain API) ---
+# --- 5. Final Upload (Guaranteed via Transfer.sh API) ---
 def upload_file(file_path):
     try:
-        print("Uploading to Pixeldrain API...")
-        res = requests.post(
-            "https://pixeldrain.com/api/file", 
-            files={"file": open(file_path, "rb")}, 
-            timeout=1200
-        )
+        print("Uploading to Transfer.sh API...")
+        file_name = os.path.basename(file_path)
+        with open(file_path, 'rb') as f:
+            res = requests.put(f"https://transfer.sh/{file_name}", data=f, timeout=1200)
         
-        if res.status_code in [200, 201]:
-            file_id = res.json().get("id")
-            direct_link = f"https://pixeldrain.com/api/file/{file_id}"
+        if res.status_code == 200:
+            link = res.text.strip()
+            # n8n download node ke liye /get/ format set karna zaroori hai
+            direct_link = link.replace("https://transfer.sh/", "https://transfer.sh/get/")
             print(f"Upload successful: {direct_link}")
             return direct_link
         else:
