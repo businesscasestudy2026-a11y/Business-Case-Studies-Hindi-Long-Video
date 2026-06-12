@@ -134,16 +134,18 @@ else:
 ffmpeg_cmd.extend(['-map', '0:v', '-map', '[a_out]', '-c:v', 'libx264', '-preset', 'fast', '-crf', '26', '-c:a', 'aac', 'final_video.mp4'])
 subprocess.run(ffmpeg_cmd, check=True)
 
-# --- 5. Final Upload (SSL Bypass Enabled) ---
+# --- 5. Final Upload (Guaranteed HTTP Mode) ---
 def upload_file(file_path):
-    print("Uploading via requests (SSL Bypass)...")
+    print("Uploading via native cURL (HTTP Mode)...")
     try:
-        with open(file_path, 'rb') as f:
-            res = requests.post("https://0x0.st", files={"file": f}, timeout=1200, verify=False)
-        if res.status_code == 200:
-            return res.text.strip()
+        # HTTP ka use karke SSL handshake error puri tarah bypass kar diya hai
+        command = ['curl', '-s', '-F', f'file=@{file_path}', 'http://0x0.st']
+        result = subprocess.check_output(command, timeout=1200).decode('utf-8').strip()
+        if "http" in result:
+            print(f"Upload success: {result}")
+            return result
     except Exception as e:
-        print(f"Primary upload failed: {e}")
+        print(f"Upload failed: {e}")
     return "Failed"
 
 video_link = upload_file('final_video.mp4')
