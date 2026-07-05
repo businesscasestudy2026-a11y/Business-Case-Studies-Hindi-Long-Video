@@ -1,4 +1,4 @@
-import os, sys, requests, json, subprocess, socket, gc, random, re
+import os, sys, requests, json, subprocess, socket, gc, random, re, time
 import urllib.parse
 from PIL import Image
 import io
@@ -180,33 +180,30 @@ print("Rendering Final Master Mix...")
 subprocess.run(ffmpeg_cmd, check=True)
 
 # ==========================================
-# UPLOAD SYSTEM & TELEGRAM BRIDGE (Indestructible Method)
+# GITHUB RELEASES UPLOAD (NEW METHOD)
 # ==========================================
-print("Starting Core Indestructible Upload System...")
-video_link = "Upload Failed"
+video_link = None
+print("\n🚀 Uploading Video directly to GitHub Releases...")
 
-endpoints = [
-    ("File.io", "https://file.io", "file", lambda r: r.json()['link']),
-    ("0x0.st", "https://0x0.st", "file", lambda r: r.text.strip()),
-    ("Uguu.se", "https://uguu.se/upload.php", "files[]", lambda r: r.json()['files'][0]['url']),
-    ("Catbox.moe", "https://catbox.moe/user/api.php", "reqtype", lambda r: r.text.strip())
-]
+run_id = os.environ.get('GITHUB_RUN_ID', str(int(time.time())))
+tag_name = f"vid-{run_id}"
+repo_name = os.environ.get('GITHUB_REPOSITORY', "amu8085-lab/my-project1") 
 
-for name, url, field, get_link in endpoints:
-    if video_link != "Upload Failed" and video_link.startswith("http"): break
-    try:
-        print(f"Trying upload to {name}...")
-        files = {field: open("final_video.mp4", 'rb')}
-        data = {'reqtype': 'fileupload'} if "catbox" in url else {}
-        res = requests.post(url, files=files, data=data, timeout=300)
-        
-        if res.status_code == 200:
-            link = get_link(res)
-            if "http" in link: 
-                video_link = link
-                print(f"✅ Upload Success: {video_link}")
-    except Exception as e: 
-        print(f"❌ {name} failed: {e}")
+try:
+    cmd = ['gh', 'release', 'create', tag_name, 'final_video.mp4', '--repo', repo_name, '--notes', 'Automated Video Render']
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    
+    if proc.returncode == 0:
+        video_link = f"https://github.com/{repo_name}/releases/download/{tag_name}/final_video.mp4"
+        print(f"✅ Success! Video uploaded to GitHub: {video_link}")
+    else:
+        err_msg = proc.stderr.strip()
+        print(f"❌ GitHub Release failed. Error: {err_msg}")
+except Exception as e:
+    print(f"⚠️ Exception during GitHub upload: {str(e)}")
+
+if not video_link:
+    video_link = "Upload Failed"
 
 # Telegram Notification (Bypassing n8n webhook)
 safe_description = str(video_desc).replace('\n', '  ')
