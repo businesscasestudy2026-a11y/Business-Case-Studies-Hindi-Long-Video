@@ -56,7 +56,8 @@ for i, scene in enumerate(scenes_data):
         audio_filter = "silenceremove=stop_periods=-1:stop_duration=0.3:stop_threshold=-35dB,bass=g=5:f=110,treble=g=3:f=8000"
         subprocess.run(['ffmpeg', '-y', '-i', raw_audio_path, '-af', audio_filter, '-ar', '44100', '-ac', '2', norm_audio_path], check=True)
         out = subprocess.check_output(['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', norm_audio_path])
-        scene_duration = float(out.decode('utf-8').strip()) + 0.2 
+        # FIXED: Removed the '+ 0.2' desync issue so video perfectly matches audio length
+        scene_duration = float(out.decode('utf-8').strip()) 
     else:
         scene_duration = 3.0
         subprocess.run(['ffmpeg', '-y', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo', '-t', str(scene_duration), norm_audio_path], check=True)
