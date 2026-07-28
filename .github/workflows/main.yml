@@ -1,8 +1,9 @@
-name: Auto Render Hindi Facts Video
+name: Auto Render Business Case Studies Video
 
 on:
   repository_dispatch:
     types: [render_and_upload]
+  workflow_dispatch:
 
 # 👇 YEH BLOCK ADD KIYA GAYA HAI (Releases create karne ki permission) 👇
 permissions:
@@ -39,15 +40,23 @@ jobs:
 
       - name: Run Video Rendering Script
         env:
+          PYTHONUNBUFFERED: "1"
+          
           FULL_TEXT: ${{ github.event.client_payload.full_text }}
           SCENES_DATA: ${{ github.event.client_payload.scenes_data }}
           CHAT_ID: ${{ github.event.client_payload.chat_id }}
           TITLE: ${{ github.event.client_payload.title }}
           DESCRIPTION: ${{ github.event.client_payload.description }}
           THUMBNAIL_PROMPT: ${{ github.event.client_payload.thumbnail_prompt }}
+          
+          # 👇 YAHAN SMART FALLBACK KEYWORDS ADD KIYA GAYA HAI 👇
+          FALLBACK_KEYWORDS: ${{ github.event.client_payload.fallback_keywords }}
+          
+          # Repository Secrets
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }} 
-          # 👇 YEH LINE ADD KI GAYI HAI 👇
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
         run: python -u render_video.py  
 
       # 👇 NAYA AUTO-DELETE BLOCK YAHAN HAI 👇
