@@ -80,17 +80,39 @@ for i, scene in enumerate(scenes_data):
     # --- 1. Audio Pipeline (MadhurNeural + Deep Audio Filter) ---
     raw_audio_path = f"raw_audio_{i}.mp3"
     norm_audio_path = f"audio_{i}.wav"
-    subprocess.run(['edge-tts', '--voice', 'hi-IN-MadhurNeural', '--text', text_line, '--write-media', raw_audio_path])
+    
+    # 🌟 PERMANENT FIX: 5-Attempt Robust Retry Logic (NO Mute Audio)
+    max_retries = 5
+    tts_success = False
+    
+    for attempt in range(max_retries):
+        try:
+            # Rate-limit se bachne ke liye 2 se 5 second ka gap (Spam filter bypass)
+            time.sleep(random.uniform(2.0, 5.0)) 
+            
+            subprocess.run(['edge-tts', '--voice', 'hi-IN-MadhurNeural', '--text', text_line, '--write-media', raw_audio_path], check=True)
+            
+            # Check karein ki file properly generate hui hai ya nahi
+            if os.path.exists(raw_audio_path) and os.path.getsize(raw_audio_path) > 0:
+                tts_success = True
+                break # Audio mil gaya, loop se bahar aa jao
+            else:
+                print(f"⚠️ Attempt {attempt+1}: Audio file khali aayi. 5 second ruk kar dobara try kar raha hoon...")
+                time.sleep(5) # Thoda lamba wait karein taaki IP unblock ho jaye
+                
+        except Exception as e:
+            print(f"❌ Attempt {attempt+1}: TTS Error - {e}")
+            time.sleep(5)
 
-    if os.path.exists(raw_audio_path):
-        audio_filter = "silenceremove=stop_periods=-1:stop_duration=0.3:stop_threshold=-35dB,bass=g=5:f=110,treble=g=3:f=8000"
-        subprocess.run(['ffmpeg', '-y', '-i', raw_audio_path, '-af', audio_filter, '-ar', '44100', '-ac', '2', norm_audio_path], check=True)
-        out = subprocess.check_output(['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', norm_audio_path])
-        # FIXED: Removed the '+ 0.2' desync issue so video perfectly matches audio length
-        scene_duration = float(out.decode('utf-8').strip()) 
-    else:
-        scene_duration = 3.0
-        subprocess.run(['ffmpeg', '-y', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo', '-t', str(scene_duration), norm_audio_path], check=True)
+    # Agar 5 koshish ke baad bhi fail hota hai, toh ERROR throw karein aur Workflow ko rok dein
+    if not tts_success:
+        raise Exception(f"🚨 CRITICAL ERROR: 5 attempts ke baad bhi Scene {i} ka audio generate nahi hua. Mute audio allow nahi hai, isliye process yahin rok diya gaya hai.")
+
+    # --- Apply Audio Filters (Agar Success Hua Toh) ---
+    audio_filter = "silenceremove=stop_periods=-1:stop_duration=0.3:stop_threshold=-35dB,bass=g=5:f=110,treble=g=3:f=8000"
+    subprocess.run(['ffmpeg', '-y', '-i', raw_audio_path, '-af', audio_filter, '-ar', '44100', '-ac', '2', norm_audio_path], check=True)
+    out = subprocess.check_output(['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', norm_audio_path])
+    scene_duration = float(out.decode('utf-8').strip()) 
 
     final_audio_path = norm_audio_path
     if os.path.exists("whoosh.mp3") and i > 0:
